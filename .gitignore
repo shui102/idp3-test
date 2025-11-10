@@ -14,3 +14,8 @@ deploy_vis_dir/
 ablation_data/
 
 training_data_example/
+/data
+/Improved-3D-Diffusion-Policy/rm_description
+/Improved-3D-Diffusion-Policy/checkpoints
+/sam2
+/utils

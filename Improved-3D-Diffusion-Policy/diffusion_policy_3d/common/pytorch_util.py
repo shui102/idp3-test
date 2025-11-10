@@ -3,17 +3,19 @@ import collections
 import torch
 import torch.nn as nn
 
-def dict_apply(
-        x: Dict[str, torch.Tensor], 
-        func: Callable[[torch.Tensor], torch.Tensor]
-        ) -> Dict[str, torch.Tensor]:
-    result = dict()
+def dict_apply(x, func):
+    result = {}
     for key, value in x.items():
         if isinstance(value, dict):
-            result[key] = dict_apply(value, func)
+            # 如果 dict 有 'shape'，说明是 shape_meta
+            if 'shape' in value:
+                result[key] = func(value)
+            else:
+                result[key] = dict_apply(value, func)
         else:
             result[key] = func(value)
     return result
+
 
 def pad_remaining_dims(x, target):
     assert x.shape == target.shape[:len(x.shape)]

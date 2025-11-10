@@ -1,0 +1,240 @@
+# ============================================================
+# iDP3 ControlNet 两阶段训练配置
+# Stage1: 预训练 UNet
+# Stage2: 微调 ControlNet
+# 支持 training.mode = ["stage1", "stage2", "two_stage"]
+# ============================================================
+name: train_diffusion_controlnet_stage1
+_target_: diffusion_policy_3d.workspace.controlnet_workspace.iDP3ControlNetWorkspace
+
+training:
+  seed: 42
+  device: "cuda:0"
+  mode: "stage1"       # 可选: stage1 / stage2 / two_stage
+  debug: false            # 若为 true，仅跑少量 batch 用于验证数据流
+
+stage1:
+  task:
+    dataset:
+      _target_: diffusion_policy_3d.dataset.controlnet_dataset.RM65_Dataset3D_Stage
+      stage: "unet"
+      horizon: ${stage1.policy.horizon}
+      pad_before: ${eval:'${stage1.policy.n_obs_steps}-1'}
+      pad_after: ${eval:'${stage1.policy.n_action_steps}-1'}
+      seed: 42
+      val_ratio: 0.05 
+      max_train_episodes: 90
+      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed.zarr"
+
+  dataloader:
+    # batch_size: 120
+    batch_size: 64
+    num_workers: 16
+    shuffle: True
+    pin_memory: True
+    persistent_workers: True
+  val_dataloader:
+    batch_size: 32
+    num_workers: 8
+    shuffle: False
+    pin_memory: True
+    persistent_workers: False
+
+  # -------- Policy --------
+  policy:
+    _target_: diffusion_policy_3d.policy.controlnet_policy.DiffusionPointcloudControlPolicy
+    shape_meta:
+      action: {shape: [10,]}
+      obs:
+        agent_pos: {shape: [10,]}
+        point_cloud: {shape: [4096, 6]}
+      control:
+        point_cloud: {shape: [1024, 3]}   # Stage1不会用到
+    train_stage: "unet"
+    horizon: 16
+    n_action_steps: 15
+    n_obs_steps: 2
+    obs_as_global_cond: true
+    diffusion_step_embed_dim: 128
+    down_dims: [256, 512, 1024]
+    kernel_size: 5
+    n_groups: 8
+
+    noise_scheduler:
+      _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+      num_train_timesteps: 50
+      beta_start: 0.0001
+      beta_end: 0.02
+      beta_schedule: squaredcos_cap_v2
+      clip_sample: True
+      set_alpha_to_one: True
+      steps_offset: 0
+      prediction_type: sample
+
+    stage1_pointcloud_encoder_cfg:
+      in_channels: 6
+      out_channels: 128
+      num_points: 4096
+      use_bn: true
+    stage2_control_encoder_cfg:
+      in_channels: 3
+      out_channels: 128
+      num_points: 1024
+      use_bn: true
+
+  # -------- Optimizer & Scheduler --------
+  optimizer:
+    _target_: torch.optim.AdamW
+    lr: 1.0e-4
+    weight_decay: 0.01
+  training:
+    device: "cuda:0"
+    seed: 42
+    debug: False
+    resume: True
+    lr_scheduler: cosine
+    lr_warmup_steps: 500
+    num_epochs: 1000
+    gradient_accumulate_every: 1
+    use_ema: True
+    rollout_every: 400
+    checkpoint_every: 100
+    val_every: 10
+    sample_every: 5
+    max_train_steps: null
+    max_val_steps: null
+    tqdm_interval_sec: 1.0
+    save_video: True
+  ema:
+    _target_: diffusion_policy_3d.model.diffusion.ema_model.EMAModel
+    inv_gamma: 1.0
+    power: 0.75
+    min_value: 0.0
+    max_value: 0.9999
+  checkpoint:
+    save_ckpt: True # if True, save checkpoint every checkpoint_every
+    topk:
+      monitor_key: test_mean_score
+      mode: max
+      k: 2
+      format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+    save_last_ckpt: True # this only saves when save_ckpt is True
+    save_last_snapshot: False
+  logging:
+    project: "iDP3-ControlNet"
+    group: "run"
+    name: "stage1-exp"
+
+# ==================== Stage2 (ControlNet 微调) ====================
+stage2:
+  # -------- Dataset --------
+  task:
+    dataset:
+      dataset:
+      _target_: diffusion_policy_3d.dataset.controlnet_dataset.RM65_Dataset3D_Stage
+      stage: "controlnet"
+      horizon: ${stage1.policy.horizon}
+      pad_before: ${eval:'${stage1.policy.n_obs_steps}-1'}
+      pad_after: ${eval:'${stage1.policy.n_action_steps}-1'}
+      seed: 42
+      val_ratio: 0.05 
+      max_train_episodes: 90
+      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed.zarr"
+
+  dataloader:
+    # batch_size: 120
+    batch_size: 64
+    num_workers: 16
+    shuffle: True
+    pin_memory: True
+    persistent_workers: True
+  val_dataloader:
+    batch_size: 32
+    num_workers: 8
+    shuffle: False
+    pin_memory: True
+    persistent_workers: False
+
+  # -------- Policy --------
+  policy:
+    _target_: diffusion_policy_3d.policy.controlnet_policy.DiffusionPointcloudControlPolicy
+    shape_meta:
+      action: {shape: [10]}
+      obs:
+        agent_pos: {shape: [10]}
+        point_cloud: {shape: [4096, 6]}
+      control:
+        control_point_cloud: {shape: [1024, 3]}
+    train_stage: "controlnet"
+    horizon: 16
+    n_action_steps: 15
+    n_obs_steps: 2
+    obs_as_global_cond: true
+    diffusion_step_embed_dim: 128
+    down_dims: [256, 512, 1024]
+    kernel_size: 5
+    n_groups: 8
+    noise_scheduler:
+      _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+      num_train_timesteps: 50
+      beta_start: 0.0001
+      beta_end: 0.02
+      beta_schedule: squaredcos_cap_v2
+      clip_sample: True
+      set_alpha_to_one: True
+      steps_offset: 0
+      prediction_type: sample
+    pretrained_unet_path: "/extra/waylen/diffusion_policy/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/outputs/2025-10-26/15-58-37/checkpoints/latest.ckpt"     # 由 workspace 自动注入
+    stage1_pointcloud_encoder_cfg:
+      in_channels: 6
+      out_channels: 128
+      num_points: 4096
+      use_bn: true
+    stage2_control_encoder_cfg:
+      in_channels: 3
+      out_channels: 128
+      num_points: 1024
+      use_bn: true
+
+  # -------- Optimizer & Scheduler --------
+  optimizer:
+    _target_: torch.optim.AdamW
+    lr: 5.0e-5
+    weight_decay: 0.01
+  training:
+    device: "cuda:0"
+    seed: 42
+    debug: False
+    resume: True
+    lr_scheduler: cosine
+    lr_warmup_steps: 500
+    num_epochs: 1000
+    gradient_accumulate_every: 1
+    use_ema: True
+    rollout_every: 400
+    checkpoint_every: 10
+    val_every: 10
+    sample_every: 5
+    max_train_steps: null
+    max_val_steps: null
+    tqdm_interval_sec: 1.0
+    save_video: True
+  ema:
+    _target_: diffusion_policy_3d.model.diffusion.ema_model.EMAModel
+    inv_gamma: 1.0
+    power: 0.75
+    min_value: 0.0
+    max_value: 0.9999
+  checkpoint:
+    save_ckpt: True # if True, save checkpoint every checkpoint_every
+    topk:
+      monitor_key: test_mean_score
+      mode: max
+      k: 2
+      format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+    save_last_ckpt: True # this only saves when save_ckpt is True
+    save_last_snapshot: False
+  logging:
+    project: "iDP3-ControlNet"
+    group: "run"
+    name: "stage2-exp"

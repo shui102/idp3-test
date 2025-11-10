@@ -10,7 +10,7 @@ exp_name: "debug"
 
 # n_obs_steps: 2
 # n_obs_steps: 1
-n_obs_steps: 4
+n_obs_steps: 2
 
 # horizon: 4
 # n_action_steps: 4
@@ -36,6 +36,7 @@ policy:
   use_mid_condition: true
   use_up_condition: true
   use_image: false
+
   
   diffusion_step_embed_dim: 128
   down_dims: [256, 512, 1024]
@@ -70,7 +71,9 @@ policy:
 
   point_downsample: true
 
- 
+  use_6d_loss: true
+  agent_pos: [[0, 3],]
+  agent_rot: [[3, 9],]
 
   pointcloud_encoder_cfg:
     in_channels: 6

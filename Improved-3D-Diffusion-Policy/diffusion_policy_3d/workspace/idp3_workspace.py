@@ -246,8 +246,10 @@ class iDP3Workspace(BaseWorkspace):
 
                             result = policy.predict_action(obs_dict)
                             pred_action = result['action_pred']
-                            mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                            train_losses.append(mse.item())
+                            mse = torch.nn.functional.mse_loss(pred_action, gt_action).item()
+                            # sixd_loss = policy.loss(pred_action, gt_action).mean().item()
+                            # cprint(f"pred{pred_action[0,:]},gt{gt_action[0,:]}","red")
+                            train_losses.append(mse)
                             
                             if (cfg.training.max_train_steps is not None) \
                                 and batch_idx >= (cfg.training.max_train_steps-1):
@@ -313,9 +315,7 @@ class iDP3Workspace(BaseWorkspace):
             policy = self.ema_model    
         policy.eval()
 
-        return policy
-
-        
+        return policy  
 
 @hydra.main(
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
