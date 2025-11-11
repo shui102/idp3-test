@@ -10,7 +10,7 @@ _target_: diffusion_policy_3d.workspace.controlnet_workspace.iDP3ControlNetWorks
 training:
   seed: 42
   device: "cuda:0"
-  mode: "stage1"       # 可选: stage1 / stage2 / two_stage
+  mode: "stage2"       # 可选: stage1 / stage2 / two_stage
   debug: false            # 若为 true，仅跑少量 batch 用于验证数据流
 
 stage1:
@@ -22,7 +22,7 @@ stage1:
       pad_before: ${eval:'${stage1.policy.n_obs_steps}-1'}
       pad_after: ${eval:'${stage1.policy.n_action_steps}-1'}
       seed: 42
-      val_ratio: 0.05 
+      val_ratio: 0.00
       max_train_episodes: 90
       zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed.zarr"
 
@@ -130,16 +130,15 @@ stage2:
   # -------- Dataset --------
   task:
     dataset:
-      dataset:
       _target_: diffusion_policy_3d.dataset.controlnet_dataset.RM65_Dataset3D_Stage
       stage: "controlnet"
       horizon: ${stage1.policy.horizon}
       pad_before: ${eval:'${stage1.policy.n_obs_steps}-1'}
       pad_after: ${eval:'${stage1.policy.n_action_steps}-1'}
       seed: 42
-      val_ratio: 0.05 
+      val_ratio: 0.00
       max_train_episodes: 90
-      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed.zarr"
+      zarr_path: "/media/shui/Lexar/obs_temp/fake_control_point_cloud.zarr"
 
   dataloader:
     # batch_size: 120
@@ -184,7 +183,7 @@ stage2:
       set_alpha_to_one: True
       steps_offset: 0
       prediction_type: sample
-    pretrained_unet_path: "/extra/waylen/diffusion_policy/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/outputs/2025-10-26/15-58-37/checkpoints/latest.ckpt"     # 由 workspace 自动注入
+    pretrained_unet_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-_seed0/checkpoints_stage1/epoch=0200-test_mean_score=-0.060.ckpt"    
     stage1_pointcloud_encoder_cfg:
       in_channels: 6
       out_channels: 128
@@ -199,7 +198,7 @@ stage2:
   # -------- Optimizer & Scheduler --------
   optimizer:
     _target_: torch.optim.AdamW
-    lr: 5.0e-5
+    lr: 2.0e-5
     weight_decay: 0.01
   training:
     device: "cuda:0"

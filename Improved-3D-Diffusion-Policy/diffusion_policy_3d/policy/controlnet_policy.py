@@ -137,10 +137,10 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
             assert pretrained_unet_path is not None, \
                 "ControlNet 阶段需要提供 pretrained_unet_path（上一阶段训练好的 Unet 权重）"
             cprint(f"[ControlNet] Loading pretrained UNet from: {pretrained_unet_path}", "yellow")
-            unet_state = torch.load(pretrained_unet_path, map_location="cpu")
+            unet_state = torch.load(pretrained_unet_path, map_location="cpu", weights_only=False)
             # self.model.unet.load_state_dict(unet_state, strict=True)
             if pretrained_unet_path.endswith(".ckpt"):
-                ckpt = torch.load(pretrained_unet_path, map_location="cpu")
+                ckpt = torch.load(pretrained_unet_path, map_location="cpu",weights_only=False)
 
                 # Lightning 保存格式兼容
                 if "state_dict" in ckpt:

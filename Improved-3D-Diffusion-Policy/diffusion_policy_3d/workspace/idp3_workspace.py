@@ -239,19 +239,18 @@ class iDP3Workspace(BaseWorkspace):
                     with torch.no_grad():                        
                         train_losses = list()
                         
-                        for batch_idx, batch in enumerate(train_dataloader):
+                        for batch_idx, batch in enumerate(val_dataloader):
                             batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
-                            # obs_dict = batch['obs']
-                            # gt_action = batch['action']
+                            obs_dict = batch['obs']
+                            gt_action = batch['action']
 
-                            # result = policy.predict_action(obs_dict)
-                            # pred_action = result['action_pred']
-                            # # mse = torch.nn.functional.mse_loss(pred_action, gt_action).item()
-                            # sixd_loss = policy.loss(pred_action, gt_action).mean().item()
+                            result = policy.predict_action(obs_dict)
+                            pred_action = result['action_pred']
+                            mse = torch.nn.functional.mse_loss(pred_action, gt_action).item()
                             
-                            raw_loss, loss_dict = self.model.compute_loss(batch)
+                            # raw_loss, loss_dict = self.model.compute_loss(batch)
                             # cprint(f"pred{pred_action[0,:]},gt{gt_action[0,:]}","red")
-                            train_losses.append(raw_loss.item())
+                            train_losses.append(mse)
                             
                             if (cfg.training.max_train_steps is not None) \
                                 and batch_idx >= (cfg.training.max_train_steps-1):

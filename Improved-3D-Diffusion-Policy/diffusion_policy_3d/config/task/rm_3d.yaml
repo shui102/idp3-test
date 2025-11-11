@@ -14,13 +14,13 @@ shape_meta: &shape_meta
 
 
 dataset:
-  _target_: diffusion_policy_3d.dataset.rm65_6d_dataset.RM65_Dataset3D
+  _target_: diffusion_policy_3d.dataset.rm65_dataset.RM65_Dataset3D
   zarr_path: data/box_zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
   seed: 42
-  val_ratio: 0.00
+  val_ratio: 0.05
   max_train_episodes: 90
 
   num_points: ${policy.pointcloud_encoder_cfg.num_points}

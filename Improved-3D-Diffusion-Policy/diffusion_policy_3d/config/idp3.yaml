@@ -90,7 +90,7 @@ ema:
 
 dataloader:
   # batch_size: 120
-  batch_size: 64
+  batch_size: 32
   num_workers: 16
   shuffle: True
   pin_memory: True
@@ -123,7 +123,7 @@ training:
   use_ema: True
   rollout_every: 400
   checkpoint_every: 100
-  val_every: 10
+  val_every: 20
   sample_every: 5
   max_train_steps: null
   max_val_steps: null
@@ -135,7 +135,7 @@ logging:
   id: null
   mode: online
   name: ${training.seed}
-  project: humanoid_mimic
+  project: new_start_by_mse
   resume: true
   tags:
   - train_diffusion_unet_hybrid

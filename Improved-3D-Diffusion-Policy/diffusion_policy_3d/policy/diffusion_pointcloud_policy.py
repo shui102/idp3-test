@@ -15,7 +15,7 @@ from diffusion_policy_3d.model.diffusion.mask_generator import LowdimMaskGenerat
 from diffusion_policy_3d.common.pytorch_util import dict_apply
 from diffusion_policy_3d.common.model_util import print_params
 from diffusion_policy_3d.model.vision_3d.pointnet_extractor import iDP3Encoder
-from diffusion_policy_3d.losses.EE_6d_loss import EE6DLoss
+# from diffusion_policy_3d.losses.EE_6d_loss import EE6DLoss
 
 class DiffusionPointcloudPolicy(BasePolicy):
     def __init__(self, 
@@ -35,9 +35,6 @@ class DiffusionPointcloudPolicy(BasePolicy):
             use_mid_condition=True,
             use_up_condition=True,
             use_pc_color=False,
-            use_6d_loss=False,
-            agent_pos=None,
-            agent_rot=None,
             pointnet_type="pointnet",
             pointcloud_encoder_cfg=None,
             point_downsample=False,
@@ -84,11 +81,6 @@ class DiffusionPointcloudPolicy(BasePolicy):
         
 
         self.use_pc_color = use_pc_color
-        self.use_6d_loss = use_6d_loss
-        if self.use_6d_loss:
-            self.agent_pos = agent_pos
-            self.agent_rot = agent_rot
-            self.loss = EE6DLoss(self.agent_pos,self.agent_rot)
 
         self.pointnet_type = pointnet_type
         cprint(f"[DiffusionPointcloudPolicy] use_pc_color: {self.use_pc_color}", "yellow")
@@ -423,31 +415,21 @@ class DiffusionPointcloudPolicy(BasePolicy):
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        if not self.use_6d_loss:
-            loss1 = F.mse_loss(pred, target, reduction='none')
-            loss1 = loss1 * loss_mask.type(loss1.dtype)
-            loss1 = reduce(loss1, 'b ... -> b (...)', 'mean')
-            loss1 = loss1.mean()
-            
+        # if not self.use_6d_loss:
+        loss = F.mse_loss(pred, target, reduction='none')
+        loss = loss * loss_mask.type(loss.dtype)
+        loss = reduce(loss, 'b ... -> b (...)', 'mean')
+        loss = loss.mean()
+        
 
-            loss_dict1 = {
-                    'bc_loss': loss1.item(),
-                }
+        loss_dict = {
+                'bc_loss': loss.item(),
+            }
         # cprint(f"mse_loss:{loss_dict1['bc_loss']}","red")
 
 
 
-        else:
-            loss_dict_detail = self.loss(pred, target)
-            loss = loss_dict_detail
-            loss = loss * loss_mask.type(loss.dtype)
-
-            loss = reduce(loss, 'b ... -> b (...)', 'mean')
-            loss = loss.mean()
-
-            loss_dict = {
-                "bc_loss": loss.item(),
-            }
+        
         # cprint(f"f_loss:{loss_dict['bc_loss']}","green")
         # cprint(f"loss_mask:{loss_mask[0,:]}","red")
 

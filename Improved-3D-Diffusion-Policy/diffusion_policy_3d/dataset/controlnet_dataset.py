@@ -43,6 +43,8 @@ class RM65_Dataset3D_Stage(BaseDataset):
         self.num_points_ctrl = num_points_ctrl
 
         buffer_keys = ['state', 'action', 'point_cloud']
+        if stage == "controlnet":
+            buffer_keys.append('control_point_cloud')
         self.replay_buffer = ReplayBuffer.copy_from_path(zarr_path, keys=buffer_keys)
 
         # === train/val mask ===
@@ -117,8 +119,10 @@ class RM65_Dataset3D_Stage(BaseDataset):
             }
 
         elif self.stage == "controlnet":
+            control = sample['control_point_cloud'].astype(np.float32)
+            # cprint(f"sample:{sample.keys()}","red")
             pc_main = point_process.uniform_sampling_numpy(point_cloud, self.num_points_unet)
-            pc_ctrl = point_process.uniform_sampling_numpy(point_cloud, self.num_points_ctrl)
+            pc_ctrl = point_process.uniform_sampling_numpy(control, self.num_points_ctrl)
 
             data = {
                 'obs': {
@@ -143,26 +147,26 @@ class RM65_Dataset3D_Stage(BaseDataset):
         return torch_data
 
 if __name__ == "__main__":
-    dataset_unet = RM65_Dataset3D_Stage(
-        zarr_path='/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed.zarr',
-        stage='unet'
-    )
-    dataset_unet.get_normalizer()
-    batch = dataset_unet[0]
-    print("\n[Stage1: UNet]")
-    print("agent_pos:", batch['obs']['agent_pos'].shape)
-    print("point_cloud:", batch['obs']['point_cloud'].shape)
-    print("action:", batch['action'].shape)
-
-    # dataset_ctrl = RM65_Dataset3D_Stage(
-    #     zarr_path='/extra/waylen/diffusion_policy/Improved-3D-Diffusion-Policy/data/training_data_example',
-    #     stage='controlnet'
+    # dataset_unet = RM65_Dataset3D_Stage(
+    #     zarr_path='/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed.zarr',
+    #     stage='unet'
     # )
-    # batch2 = dataset_ctrl[0]
-    # print("\n[Stage2: ControlNet]")
-    # print("control_point_cloud:", batch2['control']['control_point_cloud'].shape)
+    # dataset_unet.get_normalizer()
+    # batch = dataset_unet[0]
+    # print("\n[Stage1: UNet]")
+    # print("agent_pos:", batch['obs']['agent_pos'].shape)
+    # print("point_cloud:", batch['obs']['point_cloud'].shape)
+    # print("action:", batch['action'].shape)
 
-    # valset = dataset_ctrl.get_validation_dataset()
-    # normalizer = dataset_ctrl.get_normalizer()
-    # print("val length:", len(valset))
-    # print("normalizer keys:", list(normalizer.params_dict.keys()))
+    dataset_ctrl = RM65_Dataset3D_Stage(
+        zarr_path='/media/shui/Lexar/obs_temp/fake_control_point_cloud.zarr',
+        stage='controlnet'
+    )
+    batch2 = dataset_ctrl[0]
+    print("\n[Stage2: ControlNet]")
+    print("control_point_cloud:", batch2['control']['control_point_cloud'].shape)
+
+    valset = dataset_ctrl.get_validation_dataset()
+    normalizer = dataset_ctrl.get_normalizer()
+    print("val length:", len(valset))
+    print("normalizer keys:", list(normalizer.params_dict.keys()))

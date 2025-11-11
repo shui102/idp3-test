@@ -126,7 +126,7 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 if(self.epoch % stage_cfg.training.val_every == 0):
                     with torch.no_grad():
                         val_losses = []
-                        for batch_idx, batch in enumerate(val_dataloader):
+                        for batch_idx, batch in enumerate(dataloader):
                             batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
                             obs, gt = batch["obs"], batch["action"]
                             if stage_name == "stage2":
@@ -138,7 +138,7 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                                 break
                     val_loss = np.sum(val_losses)
                     step_log["val_loss"] = val_loss
-                    step_log["score"] = -val_loss
+                    step_log["test_mean_score"] = -val_loss
                     cprint(f"[{stage_name}] val_loss: {val_loss:.6f}", "cyan")
 
                 # ========== Checkpoint ==========
