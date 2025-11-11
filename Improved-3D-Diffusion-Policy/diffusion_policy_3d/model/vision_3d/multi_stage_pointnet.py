@@ -13,7 +13,7 @@ def maxpool(x, dim=-1, keepdim=False):
     return out
 
 class MultiStagePointNetEncoder(nn.Module):
-    def __init__(self, h_dim=128, out_channels=128, num_layers=4, **kwargs):
+    def __init__(self, h_dim=128, out_channels=128, num_layers=4, use_pc_color = True, **kwargs):
         super().__init__()
 
         self.h_dim = h_dim
@@ -21,8 +21,11 @@ class MultiStagePointNetEncoder(nn.Module):
         self.num_layers = num_layers
 
         self.act = nn.LeakyReLU(negative_slope=0.0, inplace=False)
-
-        self.conv_in = nn.Conv1d(3, h_dim, kernel_size=1)
+        if use_pc_color:
+            input_channels = 6  # XYZ + RGB
+        else:
+            input_channels = 3  # XYZ only
+        self.conv_in = nn.Conv1d(input_channels, h_dim, kernel_size=1)
         self.layers, self.global_layers = nn.ModuleList(), nn.ModuleList()
         for i in range(self.num_layers):
             self.layers.append(nn.Conv1d(h_dim, h_dim, kernel_size=1))

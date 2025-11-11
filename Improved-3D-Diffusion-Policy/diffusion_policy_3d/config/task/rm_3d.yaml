@@ -14,7 +14,7 @@ shape_meta: &shape_meta
 
 
 dataset:
-  _target_: diffusion_policy_3d.dataset.rm65_dataset.RM65_Dataset3D
+  _target_: diffusion_policy_3d.dataset.rm65_6d_dataset.RM65_Dataset3D
   zarr_path: data/box_zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}

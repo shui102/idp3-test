@@ -15,6 +15,7 @@ from diffusion_policy_3d.model.diffusion.mask_generator import LowdimMaskGenerat
 from diffusion_policy_3d.common.pytorch_util import dict_apply
 from diffusion_policy_3d.common.model_util import print_params
 from diffusion_policy_3d.model.vision_3d.pointnet_extractor import iDP3Encoder
+from diffusion_policy_3d.losses.EE_6d_loss import EE6DLoss
 
 class DiffusionPointcloudPolicy(BasePolicy):
     def __init__(self, 
@@ -34,6 +35,9 @@ class DiffusionPointcloudPolicy(BasePolicy):
             use_mid_condition=True,
             use_up_condition=True,
             use_pc_color=False,
+            use_6d_loss=False,
+            agent_pos=None,
+            agent_rot=None,
             pointnet_type="pointnet",
             pointcloud_encoder_cfg=None,
             point_downsample=False,
@@ -55,6 +59,7 @@ class DiffusionPointcloudPolicy(BasePolicy):
             raise NotImplementedError(f"Unsupported action shape {action_shape}")
             
         obs_shape_meta = shape_meta['obs']
+        
         obs_dict = dict_apply(obs_shape_meta, lambda x: x['shape'])
 
         obs_encoder = iDP3Encoder(observation_space=obs_dict,
@@ -66,6 +71,8 @@ class DiffusionPointcloudPolicy(BasePolicy):
 
         # create diffusion model
         obs_feature_dim = obs_encoder.output_shape()
+
+        
         input_dim = action_dim + obs_feature_dim
         global_cond_dim = None
         if obs_as_global_cond:
@@ -73,10 +80,16 @@ class DiffusionPointcloudPolicy(BasePolicy):
             if "cross_attention" in self.condition_type:
                 global_cond_dim = obs_feature_dim
             else:
-                global_cond_dim = obs_feature_dim * n_obs_steps
+                global_cond_dim = obs_encoder.output_shape() * n_obs_steps
         
 
         self.use_pc_color = use_pc_color
+        self.use_6d_loss = use_6d_loss
+        if self.use_6d_loss:
+            self.agent_pos = agent_pos
+            self.agent_rot = agent_rot
+            self.loss = EE6DLoss(self.agent_pos,self.agent_rot)
+
         self.pointnet_type = pointnet_type
         cprint(f"[DiffusionPointcloudPolicy] use_pc_color: {self.use_pc_color}", "yellow")
         cprint(f"[DiffusionPointcloudPolicy] pointnet_type: {self.pointnet_type}", "yellow")
@@ -135,7 +148,7 @@ class DiffusionPointcloudPolicy(BasePolicy):
         if not self.use_pc_color:
             nobs['point_cloud'] = nobs['point_cloud'][..., :3]
         if self.use_pc_color: # normalize color
-            nobs['point_cloud'][..., 3:] /= 255.0
+            nobs['point_cloud'][..., 3:] /= 1.0
         
         value = next(iter(nobs.values()))
         B, To = value.shape[:2]
@@ -240,7 +253,7 @@ class DiffusionPointcloudPolicy(BasePolicy):
         if not self.use_pc_color:
             nobs['point_cloud'] = nobs['point_cloud'][..., :3]
         if self.use_pc_color: # normalize color
-            nobs['point_cloud'][..., 3:] /= 255.0
+            nobs['point_cloud'][..., 3:] /= 1.0
         
         
         value = next(iter(nobs.values()))
@@ -261,12 +274,13 @@ class DiffusionPointcloudPolicy(BasePolicy):
             # condition through global feature
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
+            feat_dim = nobs_features.shape[-1]
             if "cross_attention" in self.condition_type:
                 # treat as a sequence
-                global_cond = nobs_features.reshape(B, self.n_obs_steps, -1)
+                global_cond = nobs_features.reshape(B, self.n_obs_steps, feat_dim)
             else:
                 # reshape back to B, Do
-                global_cond = nobs_features.reshape(B, -1)
+                global_cond = nobs_features.reshape(B, self.n_obs_steps * feat_dim)
             # empty data for action
             cond_data = torch.zeros(size=(B, T, Da), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
@@ -321,7 +335,7 @@ class DiffusionPointcloudPolicy(BasePolicy):
         if not self.use_pc_color:
             nobs['point_cloud'] = nobs['point_cloud'][..., :3]
         if self.use_pc_color: # normalize color
-            nobs['point_cloud'][..., 3:] /= 255.0
+            nobs['point_cloud'][..., 3:] /= 1.0
 
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]
@@ -338,13 +352,13 @@ class DiffusionPointcloudPolicy(BasePolicy):
             this_nobs = dict_apply(nobs, 
                 lambda x: x[:,:self.n_obs_steps,...].reshape(-1,*x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
-
+            feat_dim = nobs_features.shape[-1]
             if "cross_attention" in self.condition_type:
                 # treat as a sequence
                 global_cond = nobs_features.reshape(batch_size, self.n_obs_steps, -1)
             else:
                 # reshape back to B, Do
-                global_cond = nobs_features.reshape(batch_size, -1)
+                global_cond = nobs_features.reshape(batch_size, self.n_obs_steps * feat_dim)
         else:
             # reshape B, T, ... to B*T
             this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
@@ -374,7 +388,6 @@ class DiffusionPointcloudPolicy(BasePolicy):
         noisy_trajectory = self.noise_scheduler.add_noise(
             trajectory, noise, timesteps)
         
-
 
         # compute loss mask
         loss_mask = ~condition_mask
@@ -410,15 +423,122 @@ class DiffusionPointcloudPolicy(BasePolicy):
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        loss = F.mse_loss(pred, target, reduction='none')
-        loss = loss * loss_mask.type(loss.dtype)
-        loss = reduce(loss, 'b ... -> b (...)', 'mean')
-        loss = loss.mean()
-        
+        if not self.use_6d_loss:
+            loss1 = F.mse_loss(pred, target, reduction='none')
+            loss1 = loss1 * loss_mask.type(loss1.dtype)
+            loss1 = reduce(loss1, 'b ... -> b (...)', 'mean')
+            loss1 = loss1.mean()
+            
 
-        loss_dict = {
-                'bc_loss': loss.item(),
+            loss_dict1 = {
+                    'bc_loss': loss1.item(),
+                }
+        # cprint(f"mse_loss:{loss_dict1['bc_loss']}","red")
+
+
+
+        else:
+            loss_dict_detail = self.loss(pred, target)
+            loss = loss_dict_detail
+            loss = loss * loss_mask.type(loss.dtype)
+
+            loss = reduce(loss, 'b ... -> b (...)', 'mean')
+            loss = loss.mean()
+
+            loss_dict = {
+                "bc_loss": loss.item(),
             }
+        # cprint(f"f_loss:{loss_dict['bc_loss']}","green")
+        # cprint(f"loss_mask:{loss_mask[0,:]}","red")
 
         return loss, loss_dict
+
+
+
+def main():
+    # --------------------------
+    # 1. 模拟 shape_meta
+    # --------------------------
+    shape_meta = {
+        'obs': {
+            "agent_pos": {"shape": (10,)},
+            "agent_rot": {"shape": (6,)},
+            "point_cloud": {
+                'shape': (2, 4096, 6)  # (B, N_points, xyz+rgb)
+            }
+        },
+        'action': {
+            'shape': (30,)  # 假设机械臂控制维度 30
+        }
+    }
+
+    # --------------------------
+    # 2. 初始化 noise_scheduler
+    # --------------------------
+    noise_scheduler = DDPMScheduler(
+        num_train_timesteps=50
+    )
+
+    dummy_cfg = type("cfg", (), {
+        "in_channels": 6,
+        "out_channels": 128,  # 官方为128
+        "use_layernorm": True,
+        "final_norm": "layernorm",
+        "normal_channel": False,
+        "num_points": 4096,
+        "use_bn": True,
+    })()
+
+    policy = DiffusionPointcloudPolicy(
+        shape_meta=shape_meta,
+        noise_scheduler=noise_scheduler,
+        horizon=16,
+        n_action_steps=15,
+        n_obs_steps=2,
+        obs_as_global_cond=True,
+        diffusion_step_embed_dim=128,
+        down_dims=(256, 512, 1024),
+        kernel_size=5,
+        n_groups=8,
+        pointnet_type="multi_stage_pointnet",
+        pointcloud_encoder_cfg=dummy_cfg,
+        use_pc_color=True
+    )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    policy.to(device)
+    print("✅ Policy created successfully")
+
+    # --------------------------
+    # 4. 构造假数据 obs_dict
+    # --------------------------
+    B = 2
+    N_pts = 4096
+    obs_dict = {
+    'point_cloud': torch.randn(B, 2, N_pts, 6, device=device),
+    'agent_pos': torch.randn(B, 2, 10, device=device),  # 假设10维机器人状态
+    "agent_rot": torch.randn(B, 2, 6, device=device)
+    }
+
+    for key in ["agent_pos", "agent_rot", "point_cloud", "action"]:
+        policy.normalizer.params_dict[key] = nn.ParameterDict({
+            "mean": nn.Parameter(torch.zeros(1, device=device)),
+            "scale": nn.Parameter(torch.ones(1, device=device)),
+            "offset": nn.Parameter(torch.zeros(1, device=device))
+        })
+
+    # --------------------------
+    # 5. 前向测试
+    # --------------------------
+    with torch.no_grad():
+        out = policy.forward(obs_dict)
+        print("✅ Forward output shape:", out.shape)
+
+        result = policy.predict_action(obs_dict)
+        print("✅ Predict_action output keys:", result.keys())
+        print("   action shape:", result['action'].shape)
+        print("   action_pred shape:", result['action_pred'].shape)
+
+if __name__ == "__main__":
+    main()
 

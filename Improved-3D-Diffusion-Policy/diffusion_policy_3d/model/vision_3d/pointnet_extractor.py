@@ -117,7 +117,9 @@ class iDP3Encoder(nn.Module):
         
         if pointnet_type == "multi_stage_pointnet":
             from .multi_stage_pointnet import MultiStagePointNetEncoder
-            self.extractor = MultiStagePointNetEncoder(out_channels=pointcloud_encoder_cfg.out_channels)
+            self.extractor = MultiStagePointNetEncoder(
+                out_channels=pointcloud_encoder_cfg.out_channels,
+                use_pc_color=True)
         else:
             raise NotImplementedError(f"pointnet_type: {pointnet_type}")
 
@@ -152,6 +154,71 @@ class iDP3Encoder(nn.Module):
         final_feat = torch.cat([pn_feat, state_feat], dim=-1)
         return final_feat
 
+
+    def output_shape(self):
+        return self.n_output_channels
+    
+
+class ControlNetEncoder(nn.Module):
+    def __init__(
+        self,
+        observation_space: dict,
+        pointcloud_encoder_cfg=None,
+        use_pc_color=False,
+        pointnet_type="multi_stage_pointnet",
+        point_downsample=True,
+    ):
+        super().__init__()
+
+        self.point_cloud_key = "control_point_cloud"
+        self.n_output_channels = pointcloud_encoder_cfg.out_channels
+        self.num_points = pointcloud_encoder_cfg.num_points  # e.g., 1024
+
+        # 从 observation_space 获取点云 shape
+        self.point_cloud_shape = observation_space[self.point_cloud_key]
+
+        cprint(f"[ControlNetEncoder] point cloud shape: {self.point_cloud_shape}", "yellow")
+
+        # 颜色 / 通道设置
+        self.use_pc_color = use_pc_color
+        self.pointnet_type = pointnet_type
+
+        # 是否下采样
+        self.downsample = point_downsample
+        if self.downsample:
+            self.point_preprocess = point_process.uniform_sampling_torch
+        else:
+            self.point_preprocess = nn.Identity()
+
+        if pointnet_type == "multi_stage_pointnet":
+            from .multi_stage_pointnet import MultiStagePointNetEncoder
+            self.extractor = MultiStagePointNetEncoder(
+                out_channels=pointcloud_encoder_cfg.out_channels,
+                use_pc_color=False
+            )
+        else:
+            raise NotImplementedError(f"[ControlNetEncoder] Unsupported type: {pointnet_type}")
+
+        cprint(f"[ControlNetEncoder] pointnet_type: {pointnet_type}", "yellow")
+        cprint(f"[ControlNetEncoder] output dim: {self.n_output_channels}", "red")
+
+    # ======================= forward =======================
+    def forward(self, observations: dict) -> torch.Tensor:
+        """
+        observations: {'point_cloud': (B, N, 3)} 
+        return: (B, out_channels)
+        """
+        # print(observations.keys())
+        points = observations[self.point_cloud_key]
+        assert len(points.shape) == 3, cprint(
+            f"[ControlNetEncoder] Invalid point cloud shape: {points.shape}, expect (B,N,C)", "red"
+        )
+
+        if self.downsample:
+            points = self.point_preprocess(points, self.num_points)
+
+        pn_feat = self.extractor(points)
+        return pn_feat
 
     def output_shape(self):
         return self.n_output_channels

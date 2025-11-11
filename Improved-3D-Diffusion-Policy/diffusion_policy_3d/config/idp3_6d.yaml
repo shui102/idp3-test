@@ -138,7 +138,7 @@ logging:
   id: null
   mode: online
   name: ${training.seed}
-  project: humanoid_mimic
+  project: EELoss-6d
   resume: true
   tags:
   - train_diffusion_unet_hybrid

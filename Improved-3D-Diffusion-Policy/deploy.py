@@ -22,8 +22,8 @@ from diffusion_policy_3d.common.multi_realsense import MultiRealSense
 
 zenoh_path="/home/gr1p24ap0049/projects/gr1-dex-real/teleop-zenoh"
 sys.path.append(zenoh_path)
-from communication import *
-from retarget import ArmRetarget
+# from communication import *
+# from retarget import ArmRetarget
 
 
 import numpy as np
