@@ -349,13 +349,10 @@ class RM65Inference:
         self.frame_lock = threading.Lock()
         
         # threadings
-        self._joint_qpos_thread = threading.Thread(
-            target=self._receive_joint_qpos_thread, daemon=True)
-        self._joint_qpos_thread.start()
         
-        self._pose_thread = threading.Thread(
-            target=self._receive_pose_thread, daemon=True)
-        self._pose_thread.start()
+        self._joint_and_pose_thread = threading.Thread(
+            target=self._receive_joint_and_pose_thread, daemon=True)
+        self._joint_and_pose_thread.start()
         
         self._camerea_thread = threading.Thread(
             target= self._receive_image_thread,daemon=True
@@ -620,17 +617,13 @@ class RM65Inference:
                         rpy = np.array(eepose[3:6], dtype=np.float32)
 
                         # 2) rpy -> quat -> 6D rot（参考 depth_workflow_for_all.py）
-                        # 注意：eulerToQuat 期望 numpy 数组
-                        quat_np = rotation_util.eulerToQuat(rpy)  # 返回 [x, y, z, w]
-                        quat_t = torch.from_numpy(quat_np).float()
-                        rot6d_t = rotation_util.quaternion_to_rotation_6d(quat_t)
-                        rot6d = rot6d_t.numpy().reshape(-1)
-                        # cprint(f"pose: {self.pose}",color="blue")
-                
+                        rot = R.from_euler('xyz', rpy, degrees=False)
+                        rotation_mat = rot.as_matrix()
+                        rotation_6d = matrix_to_rotation_6d_numpy(rotation_mat)
+
                         # 3) 更新 10 维 pose: [xyz(3), rot6d(6), gripper(1)]
                         self.pose[0:3] = xyz.tolist()
-                        self.pose[3:9] = rot6d.tolist()
-                        # cprint(f"pose: {self.pose}",color="blue")
+                        self.pose[3:9] = rotation_6d.tolist()
                 if gripper_dict:
                     gripper_state = gripper_dict['left_arm']
                     # 更新第10维（夹爪状态，0/1 或连续值）
@@ -638,6 +631,55 @@ class RM65Inference:
                         self.pose[9] = float(gripper_state)
             except Exception as exc:
                 cprint(f"Failed to read eepose state: {exc}", "yellow")
+            time.sleep(0.01)
+    def _receive_joint_and_pose_thread(self):
+        while True:
+            try:
+                # 一次读取所有需要的数据（减少接口调用次数）
+                joint_dict = self.rm_interface.get_joint_angles()
+                eepose_dict = self.rm_interface.get_end_effector_pose()
+                gripper_dict = self.rm_interface.get_gripper_state()
+
+                # ---------------------- 处理关节角度----------------------
+                if joint_dict:
+                    left_arm_angles = joint_dict.get('left_arm')
+                    if left_arm_angles is not None:
+                        # 角度转弧度，更新前6维关节角
+                        self.joint_qpos[:6] = np.radians(left_arm_angles).tolist()
+                
+                # 处理夹爪状态（两个原线程都需要，这里统一读取一次）
+                if gripper_dict:
+                    gripper_state = gripper_dict.get('left_arm')
+                    if gripper_state is not None:
+                        # 更新关节角的第7维（夹爪状态）
+                        self.joint_qpos[6] = gripper_state
+
+                # ---------------------- 处理末端执行器位姿----------------------
+                if eepose_dict:
+                    eepose = eepose_dict.get('left_arm')
+                    if eepose is not None:
+                        # 拆分 xyz（前3维）和 rpy（后3维，已为弧度）
+                        xyz = np.array(eepose[0:3], dtype=np.float32)
+                        rpy = np.array(eepose[3:6], dtype=np.float32)
+
+                        # rpy -> 旋转矩阵 -> 6D 旋转表示
+                        rot = R.from_euler('xyz', rpy, degrees=False)
+                        rotation_mat = rot.as_matrix()
+                        rotation_6d = matrix_to_rotation_6d_numpy(rotation_mat)
+
+                        # 更新 10 维 pose：xyz(3) + rot6d(6)
+                        self.pose[0:3] = xyz.tolist()
+                        self.pose[3:9] = rotation_6d.tolist()
+                
+                # 再次使用统一读取的夹爪状态，更新 pose 第10维
+                if gripper_dict and gripper_state is not None:
+                    self.pose[9] = float(gripper_state)
+
+            except Exception as exc:
+                # 统一捕获异常，也可按操作拆分（如需区分关节/位姿读取错误）
+                cprint(f"Failed to read sensor data: {exc}", "yellow")
+            
+            # 保持原有的 10ms 采样间隔
             time.sleep(0.01)
 
     def extract_pcs_from_frame(self, rgb_array, depth_array, qpos_array):
