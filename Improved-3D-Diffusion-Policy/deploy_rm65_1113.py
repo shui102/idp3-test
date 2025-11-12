@@ -42,6 +42,64 @@ from realman65.my_robot.realman_65_interface import Realman65Interface
 
 from scipy.spatial.transform import Rotation as R
 
+def matrix_to_rotation_6d_numpy(matrix: np.ndarray) -> np.ndarray:
+    """
+    将一个 (3, 3) 旋转矩阵转换为 6D 表示。
+    
+    参数:
+    matrix: shape (3, 3) 的旋转矩阵
+    
+    返回:
+    shape (6,) 的 6D 旋转向量 [r11, r21, r31, r12, r22, r32]
+    """
+    # 提取前两列并展平
+    # (3, 3) -> (3, 2) -> (6,)
+    return matrix[:, :2].T.flatten()
+
+
+def rotation_6d_to_matrix_numpy(rot_6d: np.ndarray) -> np.ndarray:
+    """
+    将 (6,) 的 6D 旋转向量转换为 (3, 3) 的旋转矩阵。
+    
+    参数:
+    rot_6d: shape (6,) 的 numpy 数组
+    
+    返回:
+    shape (3, 3) 的旋转矩阵
+    """
+    if rot_6d.shape != (6,):
+        raise ValueError(f"输入 shape 必须是 (6,)，但得到的是 {rot_6d.shape}")
+
+    # 1. 提取前两列 a1 和 a2
+    a1 = rot_6d[0:3]
+    a2 = rot_6d[3:6]
+
+    # 2. 格拉姆-施密特正交化
+    
+    # b1 = a1 / ||a1||
+    # (添加 1e-6 是为了防止除以零)
+    b1 = a1 / (np.linalg.norm(a1) + 1e-6)
+    
+    # v2 = a2 - (b1·a2) * b1
+    # (计算 a2 在 b1 上的投影并减去)
+    dot_b1_a2 = np.dot(b1, a2)
+    v2 = a2 - dot_b1_a2 * b1
+    
+    # b2 = v2 / ||v2||
+    b2 = v2 / (np.linalg.norm(v2) + 1e-6)
+
+    # 3. 计算第三列 (叉积)
+    # b3 = b1 x b2
+    b3 = np.cross(b1, b2)
+    
+    # 4. 堆叠成 3x3 矩阵
+    # np.stack(..., axis=1) 将 [b1, b2, b3] 作为列向量堆叠
+    matrix = np.stack([b1, b2, b3], axis=1)
+    
+    return matrix
+
+
+
 class RM65Inference:
     def __init__(self,obs_horizon=2, action_horizon=8, device="gpu",
                 use_point_cloud=True, use_image=False, img_size=224,
@@ -76,19 +134,15 @@ class RM65Inference:
         
         
         # threadings
-        self._joint_qpos_thread = threading.Thread(
-            target=self._receive_joint_qpos_thread, daemon=True)
-        self._joint_qpos_thread.start()
-        
-        self._pose_thread = threading.Thread(
-            target=self._receive_pose_thread, daemon=True)
-        self._pose_thread.start()
+        self._joint_and_pose_thread = threading.Thread(
+            target=self._receive_joint_and_pose7d_thread, daemon=True)
+        self._joint_and_pose_thread.start()
         
         self._camerea_thread = threading.Thread(
             target= self._receive_image_thread,daemon=True
         )
         self._camerea_thread.start()
-        self._init_tracker(api_token= "73ebeba4255b3cf2a3dc13368ac25191",
+        self._init_tracker(api_token= "a787ccd8e3c2dc7d8e19e046ca026384",
                             prompt_text="brown-paper-cup. white-basket.",
                             detection_interval= 1000)
         time.sleep(10)
@@ -102,7 +156,8 @@ class RM65Inference:
 
             act = action_list[action_id]
             self.action_array.append(act)
-            self._execute_action_pose(act)
+            # self._execute_action_pose(act)
+            self._execute_action7d_pose(act)
             elapsed = time.time() - time_start
             sleep_time = (action_id + 1) * self.freq - elapsed
             if sleep_time > 0:
@@ -161,7 +216,7 @@ class RM65Inference:
         cprint(f"obs_dict: {obs_dict['agent_pos']}",color="red")
 
         return obs_dict
- 
+
     
     def _execute_action_angle(self, action):
         action_np = np.asarray(action, dtype=np.float64).flatten()
@@ -198,25 +253,21 @@ class RM65Inference:
                 f"Action dim {action_np.size} is insufficient for pose(need 10).")
 
         try:
-            # xyz
+            # xyz rad
             target_pos = action_np[:3]
-            # 6D 旋转（Zhou 等的两列表示），转换为 3x3 旋转矩阵
             rot6d = action_np[3:9]
-            rot_mat = rotation_util.rotation_6d_to_matrix(
-                torch.from_numpy(rot6d).reshape(1, 6)
-            ).reshape(3, 3).cpu().numpy()
-
+            rot_mat = rotation_6d_to_matrix_numpy(rot6d)
+            # rotation object
             rot = R.from_matrix(rot_mat)
-            # scalar_first=True 按照wxyz转换
-            xyzw_quat = rot.as_quat(scalar_first=True)
- 
-            # 发送到 IK 求解器
+            xyzw_quat = rot.as_quat(scalar_first=False)
+            # use ik solve
             target_rad_angle = self.rm_interface.ik_solver.move_to_pose_and_get_joints(target_pos, xyzw_quat)
             # cprint(f"target_rad_angle: {target_rad_angle}",color="blue")
             if target_rad_angle is None:
                 return
             self.rm_interface.target_joint_angles = target_rad_angle
-            self.rm_interface.init_ik = True
+            if not self.rm_interface.init_ik:
+                self.rm_interface.init_ik = True
 
         except Exception as exc:
             cprint(f"Failed to send pose command: {exc}", "red")
@@ -231,6 +282,48 @@ class RM65Inference:
                     self._last_gripper_state = gripper_cmd
                 except Exception as exc:
                     cprint(f"Failed to apply gripper command: {exc}", "yellow")
+
+    def _execute_action7d_pose(self, action):
+        """
+        期望 7 维动作：
+        [x, y, z] (3) + [rpy] (3, 弧度) + [gripper] (1)
+        - rpy 通过欧拉角 'xyz' 转为四元数（返回顺序为 [x, y, z, w]）
+        - 使用 IK 计算目标关节角，若失败（None）仍然应用夹爪动作
+        """
+        action_np = np.asarray(action, dtype=np.float64).flatten()
+        if action_np.size < 7:
+            raise ValueError(
+                f"Action dim {action_np.size} is insufficient for 7D pose(need 7).")
+
+        try:
+            # 位置与姿态（rpy 为弧度）
+            target_pos = action_np[:3]
+            rpy = action_np[3:6]
+            rot = R.from_euler('xyz', rpy, degrees=False)
+            # scipy Rotation.as_quat() 返回 [x, y, z, w]
+            xyzw_quat = rot.as_quat(scalar_first=False)
+
+            # 求解 IK 得到目标关节角
+            target_rad_angle = self.rm_interface.ik_solver.move_to_pose_and_get_joints(target_pos, xyzw_quat)
+            if target_rad_angle is not None:
+                self.rm_interface.target_joint_angles = target_rad_angle
+                if not self.rm_interface.init_ik:
+                    self.rm_interface.init_ik = True
+        except Exception as exc:
+            cprint(f"Failed to send 7D pose command: {exc}", "red")
+
+        # 夹爪（第 7 维）
+        gripper_val = action_np[6]
+        if not np.isnan(gripper_val):
+            gripper_cmd = 1 if gripper_val >= self._gripper_threshold else 0
+            if self._last_gripper_state is None or gripper_cmd != self._last_gripper_state:
+                try:
+                    self.rm_interface.set_gripper("left_arm", gripper_cmd)
+                    self._last_gripper_state = gripper_cmd
+                except Exception as exc:
+                    cprint(f"Failed to apply gripper command: {exc}", "yellow")
+
+    
     def _init_camera(self, weight=640, height=480, fps=30):
         # init camera frame stream and align it
         self.pipeline = rs.pipeline()
@@ -351,6 +444,103 @@ class RM65Inference:
             except Exception as exc:
                 cprint(f"Failed to read eepose state: {exc}", "yellow")
             time.sleep(0.01)
+    
+    def _receive_joint_and_pose_thread(self):
+        while True:
+            try:
+                # 一次读取所有需要的数据（减少接口调用次数）
+                joint_dict = self.rm_interface.get_joint_angles()
+                eepose_dict = self.rm_interface.get_end_effector_pose()
+                gripper_dict = self.rm_interface.get_gripper_state()
+                # 统一预设，避免未定义引用
+                gripper_state = None
+
+                # ---------------------- 处理关节角度----------------------
+                if joint_dict:
+                    left_arm_angles = joint_dict.get('left_arm')
+                    if left_arm_angles is not None:
+                        # 角度转弧度，更新前6维关节角
+                        self.joint_qpos[:6] = np.radians(left_arm_angles).tolist()
+                
+                # 处理夹爪状态（两个原线程都需要，这里统一读取一次）
+                if gripper_dict:
+                    gripper_state = gripper_dict.get('left_arm')
+                    if gripper_state is not None:
+                        # 更新关节角的第7维（夹爪状态）
+                        self.joint_qpos[6] = gripper_state
+
+                # ---------------------- 处理末端执行器位姿----------------------
+                if eepose_dict:
+                    eepose = eepose_dict.get('left_arm')
+                    if eepose is not None:
+                        # 拆分 xyz（前3维）和 rpy（后3维，已为弧度）
+                        xyz = np.array(eepose[0:3], dtype=np.float32)
+                        rpy = np.array(eepose[3:6], dtype=np.float32)
+
+                        # rpy -> 旋转矩阵 -> 6D 旋转表示
+                        rot = R.from_euler('xyz', rpy, degrees=False)
+                        rotation_mat = rot.as_matrix()
+                        rotation_6d = matrix_to_rotation_6d_numpy(rotation_mat)
+
+                        # 更新 10 维 pose：xyz(3) + rot6d(6)
+                        self.pose[0:3] = xyz.tolist()
+                        self.pose[3:9] = rotation_6d.tolist()
+                
+                # 再次使用统一读取的夹爪状态，更新 pose 第10维
+                if gripper_state is not None:
+                    self.pose[9] = float(gripper_state)
+
+            except Exception as exc:
+                # 统一捕获异常，也可按操作拆分（如需区分关节/位姿读取错误）
+                cprint(f"Failed to read sensor data: {exc}", "yellow")
+            
+            # 保持原有的 10ms 采样间隔
+            time.sleep(0.01)
+
+    def _receive_joint_and_pose7d_thread(self):
+        """
+        接收关节与末端执行器位姿，并将 self.pose 更新为 7 维：
+        [x, y, z] + [rpy(弧度)] + [gripper]
+        同时 self.joint_qpos 前 6 维更新为关节弧度，第 7 维为夹爪状态。
+        """
+        while True:
+            try:
+                # 统一读取，减少接口调用次数
+                joint_dict = self.rm_interface.get_joint_angles()
+                eepose_dict = self.rm_interface.get_end_effector_pose()
+                gripper_dict = self.rm_interface.get_gripper_state()
+                gripper_state = None
+
+                # 关节角：角度转弧度，更新前 6 维
+                if joint_dict:
+                    left_arm_angles = joint_dict.get('left_arm')
+                    if left_arm_angles is not None:
+                        self.joint_qpos[:6] = np.radians(left_arm_angles).tolist()
+
+                # 夹爪状态：统一读取一次，更新 joint_qpos 第 7 维
+                if gripper_dict:
+                    gripper_state = gripper_dict.get('left_arm')
+                    if gripper_state is not None:
+                        self.joint_qpos[6] = gripper_state
+
+                # 末端位姿：xyz + rpy（弧度）直接写入 self.pose 前 6 维
+                if eepose_dict:
+                    eepose = eepose_dict.get('left_arm')
+                    if eepose is not None:
+                        xyz = np.array(eepose[0:3], dtype=np.float32)
+                        rpy = np.array(eepose[3:6], dtype=np.float32)
+                        self.pose[0:3] = xyz.tolist()
+                        self.pose[3:6] = rpy.tolist()
+
+                # pose 的第 7 维为夹爪状态
+                if gripper_state is not None:
+                    self.pose[6] = float(gripper_state)
+
+            except Exception as exc:
+                cprint(f"Failed to read 7D sensor data: {exc}", "yellow")
+
+            time.sleep(0.01)
+    
 
     def extract_pcs_from_frame(self, rgb_array, depth_array, qpos_array):
         # return point cloud with input depth frame array and rgb frame array
