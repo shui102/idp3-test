@@ -127,7 +127,8 @@ class RM65Inference:
         except Exception as exc:
             cprint(f"Failed to reset RM65 robot: {exc}", "yellow")
             
-        self.pose = np.zeros(7, dtype=np.float32)
+        # self.pose = np.zeros(7, dtype=np.float32)
+        self.pose = np.zeros(10, dtype=np.float32)
         self.joint_qpos = np.zeros(7, dtype=np.float32)
         self._last_gripper_state = None
         self._gripper_threshold = 0.5
@@ -135,7 +136,7 @@ class RM65Inference:
         
         # threadings
         self._joint_and_pose_thread = threading.Thread(
-            target=self._receive_joint_and_pose7d_thread, daemon=True)
+            target=self._receive_joint_and_pose_thread, daemon=True)
         self._joint_and_pose_thread.start()
         
         self._camerea_thread = threading.Thread(
@@ -162,8 +163,8 @@ class RM65Inference:
 
             act = action_list[action_id]
             self.action_array.append(act)
-            # self._execute_action_pose(act)
-            self._execute_action7d_pose(act)
+            self._execute_action_pose(act)
+            # self._execute_action7d_pose(act)
             elapsed = time.time() - time_start
             sleep_time = (action_id + 1) * self.freq - elapsed
             if sleep_time > 0:

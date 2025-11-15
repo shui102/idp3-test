@@ -10,6 +10,7 @@ from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 import diffusion_policy_3d.model.vision_3d.point_process as point_process
 from termcolor import cprint
 
+SELECTED_INDICES = [i for i in range(7)]
 class RM65_Dataset3D(BaseDataset):
     def __init__(self,
             zarr_path, 
@@ -70,8 +71,8 @@ class RM65_Dataset3D(BaseDataset):
     # ✅ 修改点1: 归一化阶段只用前7维 action / agent_qpos
     # =========================================================
     def get_normalizer(self, mode='limits', **kwargs):
-        action_7d = self.replay_buffer['action'][..., :10]
-        agent_pos_7d = self.replay_buffer['state'][..., :10]  # ✅ 改名保持一致
+        action_7d = self.replay_buffer['action'][..., SELECTED_INDICES]
+        agent_pos_7d = self.replay_buffer['state'][..., SELECTED_INDICES]  # ✅ 改名保持一致
 
         data = {
             'action': action_7d,
@@ -93,8 +94,8 @@ class RM65_Dataset3D(BaseDataset):
     # =========================================================
     def _sample_to_data(self, sample):
         # 截取前7维 agent_pos / action
-        agent_pos = sample['state'][..., :10].astype(np.float32)
-        action = sample['action'][..., :10].astype(np.float32)
+        agent_pos = sample['state'][..., SELECTED_INDICES].astype(np.float32)
+        action = sample['action'][..., SELECTED_INDICES].astype(np.float32)
 
         # 点云下采样
         point_cloud = sample['point_cloud'].astype(np.float32)

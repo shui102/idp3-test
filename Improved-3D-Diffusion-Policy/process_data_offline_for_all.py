@@ -370,7 +370,7 @@ class IncrementalObjectTracker:
             gc.collect()
             torch.cuda.empty_cache()
 
-        print(f"[Tracker] Total processed frames: {self.total_frames}")
+        # print(f"[Tracker] Total processed frames: {self.total_frames}")
         return annotated_frame, mask_array
 
 

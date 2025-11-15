@@ -127,7 +127,7 @@ class RM65Inference:
         except Exception as exc:
             cprint(f"Failed to reset RM65 robot: {exc}", "yellow")
             
-        self.pose = np.zeros(7, dtype=np.float32)
+        self.pose = np.zeros(4, dtype=np.float32)
         self.joint_qpos = np.zeros(7, dtype=np.float32)
         self._last_gripper_state = None
         self._gripper_threshold = 0.5
@@ -135,7 +135,7 @@ class RM65Inference:
         
         # threadings
         self._joint_and_pose_thread = threading.Thread(
-            target=self._receive_joint_and_pose7d_thread, daemon=True)
+            target=self._receive_joint_and_pose4d_thread, daemon=True)
         self._joint_and_pose_thread.start()
         
         self._camerea_thread = threading.Thread(
@@ -163,7 +163,8 @@ class RM65Inference:
             act = action_list[action_id]
             self.action_array.append(act)
             # self._execute_action_pose(act)
-            self._execute_action7d_pose(act)
+            # self._execute_action7d_pose(act)
+            self._execute_action4d_pose_fix_orientation(act)
             elapsed = time.time() - time_start
             sleep_time = (action_id + 1) * self.freq - elapsed
             if sleep_time > 0:
@@ -329,7 +330,60 @@ class RM65Inference:
                 except Exception as exc:
                     cprint(f"Failed to apply gripper command: {exc}", "yellow")
 
-    
+    def _execute_action4d_pose_fix_orientation(self, action):
+        """
+        固定姿态（保持第一次执行时的初始姿态），仅 XYZ 位置变化：
+        [x, y, z] (3, 来自动作) + [固定RPY] (3, 初始姿态) + [gripper] (1, 来自动作)
+        - 第一次执行时记录初始姿态的四元数，后续复用
+        - 仅使用动作中的 XYZ 位置和夹爪信号，忽略动作中的 RPY 部分
+        - IK 计算时用「变化的 XYZ + 固定的姿态」，夹爪动作正常保留
+        """
+        action_np = np.asarray(action, dtype=np.float64).flatten()
+        if action_np.size < 4:
+            raise ValueError(
+                f"Action dim {action_np.size} is insufficient for 4D pose(need 4).")
+
+        try:
+            # -------------------------- 核心修改：固定姿态（初始姿态）--------------------------
+            # 1. 第一次执行时，记录初始姿态的四元数（从当前机器人状态获取）
+            if not hasattr(self, '_fixed_attitude_quat'):
+                # 调用现有接口获取末端位姿（xyz + rpy）
+                eepose_dict = self.rm_interface.get_end_effector_pose()
+                if eepose_dict:
+                    eepose = eepose_dict['left_arm']
+                    fixed_rpy = np.array(eepose[3:6], dtype=np.float64)  # 提取 RPY（已为弧度）
+                    # 转换为四元数（与原代码逻辑一致：xyz 顺序，返回 [x,y,z,w]）
+                    rot = R.from_euler('xyz', fixed_rpy, degrees=False)
+                    self._fixed_attitude_quat = rot.as_quat(scalar_first=False)
+                    # cprint(f"Recorded fixed initial attitude (RPY): {fixed_rpy.round(3)}, quaternion: {self._fixed_attitude_quat.round(3)}", "green")
+                else:
+                    raise RuntimeError("Failed to get initial end-effector pose for fixed attitude")
+            
+            # 2. 仅从动作中获取 XYZ 位置（忽略动作中的 RPY 维度 3-5）
+            target_pos = action_np[:3]
+            # 3. 复用固定姿态的四元数（不再从动作中读取 RPY）
+            xyzw_quat = self._fixed_attitude_quat
+            # --------------------------------------------------------------------------------
+
+            # 求解 IK 得到目标关节角（固定姿态 + 变化位置）
+            target_rad_angle = self.rm_interface.ik_solver.move_to_pose_and_get_joints(target_pos, xyzw_quat)
+            if target_rad_angle is not None:
+                self.rm_interface.target_joint_angles = target_rad_angle
+                if not self.rm_interface.init_ik:
+                    self.rm_interface.init_ik = True
+        except Exception as exc:
+            cprint(f"Failed to send 7D pose command (fixed attitude): {exc}", "red")
+
+        # 夹爪控制（保持原逻辑不变）
+        gripper_val = action_np[3]
+        if not np.isnan(gripper_val):
+            gripper_cmd = 1 if gripper_val >= self._gripper_threshold else 0
+            if self._last_gripper_state is None or gripper_cmd != self._last_gripper_state:
+                try:
+                    self.rm_interface.set_gripper("left_arm", gripper_cmd)
+                    self._last_gripper_state = gripper_cmd
+                except Exception as exc:
+                    cprint(f"Failed to apply gripper command: {exc}", "yellow")
     def _init_camera(self, weight=640, height=480, fps=30):
         # init camera frame stream and align it
         self.pipeline = rs.pipeline()
@@ -541,6 +595,50 @@ class RM65Inference:
                 # pose 的第 7 维为夹爪状态
                 if gripper_state is not None:
                     self.pose[6] = float(gripper_state)
+
+            except Exception as exc:
+                cprint(f"Failed to read 7D sensor data: {exc}", "yellow")
+
+            time.sleep(0.01)
+    
+    def _receive_joint_and_pose4d_thread(self):
+        """
+        接收关节与末端执行器位姿，并将 self.pose 更新为 7 维：
+        [x, y, z] + [rpy(弧度)] + [gripper]
+        同时 self.joint_qpos 前 6 维更新为关节弧度，第 7 维为夹爪状态。
+        """
+        while True:
+            try:
+                # 统一读取，减少接口调用次数
+                joint_dict = self.rm_interface.get_joint_angles()
+                eepose_dict = self.rm_interface.get_end_effector_pose()
+                gripper_dict = self.rm_interface.get_gripper_state()
+                gripper_state = None
+
+                # 关节角：角度转弧度，更新前 6 维
+                if joint_dict:
+                    left_arm_angles = joint_dict.get('left_arm')
+                    if left_arm_angles is not None:
+                        self.joint_qpos[:6] = np.radians(left_arm_angles).tolist()
+
+                # 夹爪状态：统一读取一次，更新 joint_qpos 第 7 维
+                if gripper_dict:
+                    gripper_state = gripper_dict.get('left_arm')
+                    if gripper_state is not None:
+                        self.joint_qpos[6] = gripper_state
+
+                # 末端位姿：xyz + rpy（弧度）直接写入 self.pose 前 6 维
+                if eepose_dict:
+                    eepose = eepose_dict.get('left_arm')
+                    if eepose is not None:
+                        xyz = np.array(eepose[0:3], dtype=np.float32)
+                        # rpy = np.array(eepose[3:6], dtype=np.float32)
+                        self.pose[0:3] = xyz.tolist()
+                        # self.pose[3:6] = rpy.tolist()
+
+                # pose 的第 4 维为夹爪状态
+                if gripper_state is not None:
+                    self.pose[3] = float(gripper_state)
 
             except Exception as exc:
                 cprint(f"Failed to read 7D sensor data: {exc}", "yellow")

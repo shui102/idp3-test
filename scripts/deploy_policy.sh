@@ -39,7 +39,9 @@ export CUDA_VISIBLE_DEVICES=${gpu_id}
 #                             checkpoint.save_ckpt=${save_ckpt} \
 #                             task.dataset.zarr_path=$dataset_path 
 
-python deploy_rm65_1111_yzq.py --config-name=${config_name}.yaml \
+# deploy_rm65_1113_joint.py 预测关节角度
+# deploy_rm65_1113 _fix_orientation.py 固定姿态
+python deploy_rm65_1113_joint.py --config-name=${config_name}.yaml \
                             task=${task_name} \
                             hydra.run.dir=${run_dir} \
                             training.debug=$DEBUG \
