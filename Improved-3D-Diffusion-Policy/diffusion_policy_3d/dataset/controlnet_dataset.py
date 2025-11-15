@@ -13,7 +13,7 @@ from diffusion_policy_3d.model.common.normalizer import (
 from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 import diffusion_policy_3d.model.vision_3d.point_process as point_process
 
-
+SELECTED_INDICES = [i for i in range(7)]
 class RM65_Dataset3D_Stage(BaseDataset):
     """
     两阶段数据加载器:
@@ -84,8 +84,8 @@ class RM65_Dataset3D_Stage(BaseDataset):
 
     def get_normalizer(self, mode='limits', **kwargs):
         """根据阶段返回对应字段的 normalizer"""
-        action = self.replay_buffer['action'][..., :10]
-        agent_pos = self.replay_buffer['state'][..., :10]
+        action = self.replay_buffer['action'][..., SELECTED_INDICES]
+        agent_pos = self.replay_buffer['state'][..., SELECTED_INDICES]
 
         data = {'action': action, 'agent_pos': agent_pos}
         normalizer = LinearNormalizer()
@@ -103,8 +103,8 @@ class RM65_Dataset3D_Stage(BaseDataset):
 
     def _sample_to_data(self, sample):
         """采样转换为模型输入格式"""
-        agent_pos = sample['state'][..., :10].astype(np.float32)
-        action = sample['action'][..., :10].astype(np.float32)
+        agent_pos = sample['state'][..., SELECTED_INDICES].astype(np.float32)
+        action = sample['action'][..., SELECTED_INDICES].astype(np.float32)
         point_cloud = sample['point_cloud'].astype(np.float32)
 
         # Stage 区分逻辑

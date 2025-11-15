@@ -42,6 +42,13 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
         self.global_step = 0
         self.epoch = 0
 
+        self.model = None
+        self.optimizer = None
+        self.ema_model = None       
+        self.lr_scheduler = None
+        self.ema = None
+
+
     # ==========================================================
     # 通用单阶段训练函数
     # ==========================================================
@@ -181,6 +188,12 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
             model = hydra.utils.instantiate(_stage1.policy)
             ema_model = copy.deepcopy(model) if _stage1.training.use_ema else None
             optimizer = hydra.utils.instantiate(_stage1.optimizer, params=model.parameters())
+
+            self.model = model
+            self.optimizer = optimizer
+            self.ema_model =  ema_model 
+
+
             lr_scheduler = get_scheduler(
                 _stage1.training.lr_scheduler,
                 optimizer=optimizer,
@@ -188,8 +201,16 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 num_training_steps=(len(dataset) * _stage1.training.num_epochs) // _stage1.training.gradient_accumulate_every,
                 last_epoch=self.global_step - 1,
             )
-            ema = hydra.utils.instantiate(_stage1.ema, model=ema_model) if _stage1.training.use_ema else None
+            ema = hydra.utils.instantiate(_stage1.ema, model=ema_model) if _stage1.training.use_ema else None            
+            self.lr_scheduler = lr_scheduler
+            self.ema = ema
 
+            if _stage1.training.resume and mode == "stage1":
+                lastest_ckpt_path = self.get_checkpoint_path()
+                if lastest_ckpt_path.is_file():
+                    cprint(f"[Stage1] Resuming from checkpoint {lastest_ckpt_path}", "magenta")
+                    self.load_checkpoint(path=lastest_ckpt_path)
+        
             model.set_normalizer(normalizer)
             if ema_model:
                 ema_model.set_normalizer(normalizer)
@@ -201,6 +222,19 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
             os.makedirs(os.path.dirname(stage1_path), exist_ok=True)
             torch.save(model.model.state_dict(), stage1_path)
             cprint(f"[Stage1] UNet saved to {stage1_path}", "magenta")
+
+            if mode == "two_stage" and not cfg.training.resume:
+                cprint("Resetting global_step and epoch for Stage 2", "yellow")
+                self.global_step = 0
+                self.epoch = 0
+
+
+            self.model = None
+            self.optimizer = None
+            self.lr_scheduler = None
+            self.ema_model = None
+            self.ema = None
+
         else:
             stage1_path = os.path.join(self.output_dir, "tmp", "pretrained_unet_stage1.pth")
             cprint(f"[Stage1 skipped] Expecting pretrained UNet at {stage1_path}", "yellow")
@@ -220,6 +254,12 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
             model = hydra.utils.instantiate(_stage2.policy)
             ema_model = copy.deepcopy(model) if _stage2.training.use_ema else None
             optimizer = hydra.utils.instantiate(_stage2.optimizer, params=model.parameters())
+            
+            self.model = model
+            self.optimizer = optimizer
+            self.ema_model = ema_model
+        
+            
             lr_scheduler = get_scheduler(
                 _stage2.training.lr_scheduler,
                 optimizer=optimizer,
@@ -228,6 +268,18 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 last_epoch=self.global_step - 1,
             )
             ema = hydra.utils.instantiate(_stage2.ema, model=ema_model) if _stage2.training.use_ema else None
+
+            self.lr_scheduler = lr_scheduler
+            self.ema = ema
+
+            if _stage2.training.resume:
+                lastest_ckpt_path = self.get_checkpoint_path()
+                if lastest_ckpt_path.is_file():
+                    cprint(f"[Stage2] Resuming from checkpoint {lastest_ckpt_path}", "magenta")
+                    self.load_checkpoint(path=lastest_ckpt_path)
+                else:
+                    cprint(f"[Stage2] Resume=True, but no checkpoint found. Starting from scratch.", "yellow")
+
 
             model.set_normalizer(normalizer)
             if ema_model:

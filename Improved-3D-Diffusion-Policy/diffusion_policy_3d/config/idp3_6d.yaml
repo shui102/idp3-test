@@ -10,7 +10,7 @@ exp_name: "debug"
 
 # n_obs_steps: 2
 # n_obs_steps: 1
-n_obs_steps: 2
+n_obs_steps: 4
 
 # horizon: 4
 # n_action_steps: 4
@@ -36,6 +36,7 @@ policy:
   use_mid_condition: true
   use_up_condition: true
   use_image: false
+
   
   diffusion_step_embed_dim: 128
   down_dims: [256, 512, 1024]
@@ -70,7 +71,9 @@ policy:
 
   point_downsample: true
 
- 
+  use_6d_loss: true
+  agent_pos: [[0, 3],]
+  agent_rot: [[3, 9],]
 
   pointcloud_encoder_cfg:
     in_channels: 6
@@ -90,15 +93,15 @@ ema:
 
 dataloader:
   # batch_size: 120
-  batch_size: 64
-  num_workers: 16
+  batch_size: 32
+  num_workers: 8
   shuffle: True
   pin_memory: True
   persistent_workers: True
 
 val_dataloader:
   # batch_size: 120
-  batch_size: 64
+  batch_size: 32
   num_workers: 8
   shuffle: False
   pin_memory: True
@@ -109,7 +112,7 @@ optimizer:
   lr: 1.0e-4
   betas: [0.95, 0.999]
   eps: 1.0e-8
-  weight_decay: 1.0e-4
+  weight_decay: 1.0e-6
 
 training:
   device: "cuda:0"
@@ -122,8 +125,8 @@ training:
   gradient_accumulate_every: 1
   use_ema: True
   rollout_every: 400
-  checkpoint_every: 50
-  val_every: 50
+  checkpoint_every: 100
+  val_every: 100
   sample_every: 5
   max_train_steps: null
   max_val_steps: null
@@ -135,18 +138,18 @@ logging:
   id: null
   mode: online
   name: ${training.seed}
-  project: train_10dpose_at_11142218
+  project: humanoid_mimic
   resume: true
   tags:
   - train_diffusion_unet_hybrid
   - dexdeform
 
 checkpoint:
-  save_ckpt: True # if True, save checkpoint every checkpoint_every
+  save_ckpt: False # if True, save checkpoint every checkpoint_every
   topk:
     monitor_key: test_mean_score
     mode: max
-    k: 1
+    k: 0
     format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
   save_last_ckpt: True # this only saves when save_ckpt is True
   save_last_snapshot: False

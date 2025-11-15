@@ -16,6 +16,7 @@ from diffusion_policy_3d.common.pytorch_util import dict_apply
 from diffusion_policy_3d.common.model_util import print_params
 from diffusion_policy_3d.model.vision_3d.pointnet_extractor import iDP3Encoder
 # from diffusion_policy_3d.losses.EE_6d_loss import EE6DLoss
+import numpy as np
 
 class DiffusionPointcloudPolicy(BasePolicy):
     def __init__(self, 
@@ -418,22 +419,34 @@ class DiffusionPointcloudPolicy(BasePolicy):
         # if not self.use_6d_loss:
         loss = F.mse_loss(pred, target, reduction='none')
         loss = loss * loss_mask.type(loss.dtype)
-        loss = reduce(loss, 'b ... -> b (...)', 'mean')
-        loss = loss.mean()
         
+        
+        loss_x = loss[..., 0].mean()
+        loss_y = loss[..., 1].mean()
+        loss_z = loss[..., 2].mean()
+        loss_rot = loss[..., 3:9].mean()
+        loss_gripper = loss[..., 9].mean() 
+
+        feat_dim = loss.shape[-1] 
+        weights = torch.ones(feat_dim, device=loss.device, dtype=loss.dtype)
+        weights[:3] = 100
+        # weights[2] = 100 
+        weights[3:9] = 1
+        weights[9] = 0.1
+        weighted_loss = loss * weights 
+        total_loss = reduce(weighted_loss, 'b ... -> b (...)', 'mean')
+        total_loss = total_loss.mean()
 
         loss_dict = {
-                'bc_loss': loss.item(),
-            }
-        # cprint(f"mse_loss:{loss_dict1['bc_loss']}","red")
+            'bc_loss': total_loss.item(),      # 总 loss (已加权)
+            'x_loss': loss_x.item()*weights[0].item(),           # x 维度 loss (未加权)
+            'y_loss': loss_y.item()*weights[1].item(),           # y 维度 loss (未加权)
+            'z_loss': loss_z.item()*weights[2].item(),           # z 维度 loss (未加权)
+            'rot_loss': loss_rot.item()*weights[3].item(),         # rot 维度 loss (未加权)
+            'gripper_loss': loss_gripper.item()*weights[9].item(), # gripper 维度 loss (未加权)
+        }
 
-
-
-        
-        # cprint(f"f_loss:{loss_dict['bc_loss']}","green")
-        # cprint(f"loss_mask:{loss_mask[0,:]}","red")
-
-        return loss, loss_dict
+        return total_loss, loss_dict
 
 
 

@@ -10,7 +10,7 @@ from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 import diffusion_policy_3d.model.vision_3d.point_process as point_process
 from termcolor import cprint
 
-SELECTED_INDICES = [i for i in range(7)]
+SELECTED_INDICES = [i for i in range(10)]
 class RM65_Dataset3D(BaseDataset):
     def __init__(self,
             zarr_path, 
@@ -81,8 +81,19 @@ class RM65_Dataset3D(BaseDataset):
 
         normalizer = LinearNormalizer()
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
-
+        # normalizer['action'] = SingleFieldLinearNormalizer.create_identity()
+        # normalizer['agent_pos'] = SingleFieldLinearNormalizer.create_identity()
         normalizer['point_cloud'] = SingleFieldLinearNormalizer.create_identity()
+
+        for k in ['action', 'agent_pos']:
+            if (k in normalizer.params_dict and 
+                hasattr(normalizer[k], 'params_dict') and
+                'input_stats' in normalizer[k].params_dict and
+                'std' in normalizer[k].params_dict.input_stats):
+                std_param = normalizer[k].params_dict.input_stats.std
+                with torch.no_grad():
+                    std_param.data.clamp_(min=1e-1) 
+
         return normalizer
 
 
