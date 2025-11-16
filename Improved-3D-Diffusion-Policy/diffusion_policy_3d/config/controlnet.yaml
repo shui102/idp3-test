@@ -34,8 +34,8 @@ stage1:
     pin_memory: True
     persistent_workers: True
   val_dataloader:
-    batch_size: 32
-    num_workers: 8
+    batch_size: 64
+    num_workers: 16
     shuffle: False
     pin_memory: True
     persistent_workers: False
@@ -59,6 +59,7 @@ stage1:
     down_dims: [256, 512, 1024]
     kernel_size: 5
     n_groups: 8
+    num_inference_steps: 10
 
     noise_scheduler:
       _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
@@ -86,7 +87,9 @@ stage1:
   optimizer:
     _target_: torch.optim.AdamW
     lr: 1.0e-4
-    weight_decay: 0.01
+    betas: [0.95, 0.999]
+    eps: 1.0e-8
+    weight_decay: 1.0e-4
   training:
     device: "cuda:0"
     seed: 42
@@ -98,8 +101,8 @@ stage1:
     gradient_accumulate_every: 1
     use_ema: True
     rollout_every: 400
-    checkpoint_every: 100
-    val_every: 10
+    checkpoint_every: 50
+    val_every: 50
     sample_every: 5
     max_train_steps: null
     max_val_steps: null
@@ -116,7 +119,7 @@ stage1:
     topk:
       monitor_key: test_mean_score
       mode: max
-      k: 2
+      k: 1
       format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
     save_last_ckpt: True # this only saves when save_ckpt is True
     save_last_snapshot: False
@@ -148,8 +151,8 @@ stage2:
     pin_memory: True
     persistent_workers: True
   val_dataloader:
-    batch_size: 32
-    num_workers: 8
+    batch_size: 64
+    num_workers: 16
     shuffle: False
     pin_memory: True
     persistent_workers: False
@@ -198,8 +201,10 @@ stage2:
   # -------- Optimizer & Scheduler --------
   optimizer:
     _target_: torch.optim.AdamW
-    lr: 2.0e-5
-    weight_decay: 0.01
+    lr: 1.0e-5
+    betas: [0.95, 0.999]
+    eps: 1.0e-8
+    weight_decay: 1.0e-4
   training:
     device: "cuda:0"
     seed: 42
@@ -211,8 +216,8 @@ stage2:
     gradient_accumulate_every: 1
     use_ema: True
     rollout_every: 400
-    checkpoint_every: 10
-    val_every: 10
+    checkpoint_every: 50
+    val_every: 50
     sample_every: 5
     max_train_steps: null
     max_val_steps: null
@@ -229,7 +234,7 @@ stage2:
     topk:
       monitor_key: test_mean_score
       mode: max
-      k: 2
+      k: 1
       format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
     save_last_ckpt: True # this only saves when save_ckpt is True
     save_last_snapshot: False

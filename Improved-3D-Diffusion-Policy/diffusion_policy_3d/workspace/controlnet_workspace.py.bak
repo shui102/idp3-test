@@ -1,3 +1,7 @@
+# ================================================================
+# Two-stage iDP3 ControlNet Workspace
+# 继承原版 iDP3Workspace 功能 + 增加 Stage1/Stage2 + 单阶段调试模式
+# ================================================================
 if __name__ == "__main__":
     import sys, os, pathlib
     ROOT_DIR = str(pathlib.Path(__file__).parent.parent.parent)
@@ -38,23 +42,16 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
         self.global_step = 0
         self.epoch = 0
 
-        cfg = copy.deepcopy(self.cfg)
-        mode = getattr(cfg.training, "mode", "two_stage")
-        # two stage is only used for training, want inference, use stage2 instead
-        if mode in ["stage1"]:
-            _stage1 = cfg.stage1
-            self.model = hydra.utils.instantiate(_stage1.policy)
-            self.ema_model = copy.deepcopy(self.model) if _stage1.training.use_ema else None
-            self.optimizer = hydra.utils.instantiate(_stage1.optimizer, params=self.model.parameters())
-            self.ema = hydra.utils.instantiate(_stage1.ema, model=self.ema_model) if _stage1.training.use_ema else None
+        self.model = None
+        self.optimizer = None
+        self.ema_model = None       
+        self.lr_scheduler = None
+        self.ema = None
 
-        if mode in ["stage2"]:
-            _stage2 = cfg.stage2
-            self.model = hydra.utils.instantiate(_stage2.policy)
-            self.ema_model = copy.deepcopy(self.model) if _stage2.training.use_ema else None
-            self.optimizer = hydra.utils.instantiate(_stage2.optimizer, params=self.model.parameters())
-            self.ema = hydra.utils.instantiate(_stage2.ema, model=self.ema_model) if _stage2.training.use_ema else None
 
+    # ==========================================================
+    # 通用单阶段训练函数
+    # ==========================================================
     def _train_stage(self, stage_name, stage_cfg, dataset, val_dataset, model, ema_model, optimizer, lr_scheduler, ema):
         device = torch.device(stage_cfg.training.device)
         dataloader = DataLoader(dataset, **stage_cfg.dataloader)
@@ -136,7 +133,7 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 if(self.epoch % stage_cfg.training.val_every == 0):
                     with torch.no_grad():
                         val_losses = []
-                        for batch_idx, batch in enumerate(val_dataloader):
+                        for batch_idx, batch in enumerate(dataloader):
                             batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
                             obs, gt = batch["obs"], batch["action"]
                             if stage_name == "stage2":
@@ -172,7 +169,10 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
 
         wandb_run.finish()
         return np.mean(train_losses)
-    
+
+    # ==========================================================
+    # 主流程：支持 Stage1 / Stage2 / Two-stage
+    # ==========================================================
     def run(self):
         cfg = copy.deepcopy(self.cfg)
         mode = getattr(cfg.training, "mode", "two_stage")
@@ -202,13 +202,14 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 last_epoch=self.global_step - 1,
             )
             ema = hydra.utils.instantiate(_stage1.ema, model=ema_model) if _stage1.training.use_ema else None            
+            self.lr_scheduler = lr_scheduler
             self.ema = ema
 
             if _stage1.training.resume and mode == "stage1":
                 lastest_ckpt_path = self.get_checkpoint_path()
                 if lastest_ckpt_path.is_file():
                     cprint(f"[Stage1] Resuming from checkpoint {lastest_ckpt_path}", "magenta")
-                    self.load_checkpoint(path=lastest_ckpt_path,exclude_keys=["lr_scheduler"])
+                    self.load_checkpoint(path=lastest_ckpt_path)
         
             model.set_normalizer(normalizer)
             if ema_model:
@@ -230,7 +231,9 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
 
             self.model = None
             self.optimizer = None
+            self.lr_scheduler = None
             self.ema_model = None
+            self.ema = None
 
         else:
             stage1_path = os.path.join(self.output_dir, "tmp", "pretrained_unet_stage1.pth")
@@ -265,12 +268,15 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 last_epoch=self.global_step - 1,
             )
             ema = hydra.utils.instantiate(_stage2.ema, model=ema_model) if _stage2.training.use_ema else None
+
+            self.lr_scheduler = lr_scheduler
             self.ema = ema
+
             if _stage2.training.resume:
                 lastest_ckpt_path = self.get_checkpoint_path()
                 if lastest_ckpt_path.is_file():
                     cprint(f"[Stage2] Resuming from checkpoint {lastest_ckpt_path}", "magenta")
-                    self.load_checkpoint(path=lastest_ckpt_path, exclude_keys=["lr_scheduler"])
+                    self.load_checkpoint(path=lastest_ckpt_path)
                 else:
                     cprint(f"[Stage2] Resume=True, but no checkpoint found. Starting from scratch.", "yellow")
 
@@ -289,25 +295,16 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
         cfg = copy.deepcopy(self.cfg)
         tag = "latest"
         last_ckpt = self.get_checkpoint_path(tag=tag)
-
-        cfg = copy.deepcopy(self.cfg)
-        mode = getattr(cfg.training, "mode", "two_stage")
-        assert mode in ["stage1", "stage2", "two_stage"], "mode 必须是 stage1, stage2 或 two_stage"
-
-        if mode in ["stage1"]:
-            _stage = cfg.stage1
-        if mode in ["stage2", "two_stage"]:
-            _stage = cfg.stage2
-
         if last_ckpt.is_file():
             cprint(f"Resuming from checkpoint {last_ckpt}", "magenta")
-            self.load_checkpoint(path=last_ckpt,exclude_keys=["lr_scheduler"])
+            self.load_checkpoint(path=last_ckpt)
         policy = self.model
-        if _stage.training.use_ema:
+        if cfg.training.use_ema:
             policy = self.ema_model
         policy.eval()
         return policy
-    
+
+
 @hydra.main(
     config_path="/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/diffusion_policy_3d/config",
     config_name="controlnet.yaml",

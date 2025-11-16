@@ -417,9 +417,36 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
         # ------ MSE（mask 位置不计入）------
         loss = F.mse_loss(pred, target, reduction='none')
         loss = loss * (~condition_mask).type(loss.dtype)
-        loss = reduce(loss, 'b ... -> b (...)', 'mean').mean()
+        # loss = reduce(loss, 'b ... -> b (...)', 'mean').mean()
 
-        return loss, {"bc_loss": float(loss.item())}
+        feat_dim = loss.shape[-1] 
+        weights = torch.ones(feat_dim, device=loss.device, dtype=loss.dtype)
+        loss_dict = dict() 
+
+        if feat_dim == 7:
+            weights[:6] = 1
+            weights[6] = 0.2
+            loss_joint = loss[..., :6].mean().item()*weights[0].item()
+            loss_gripper = loss[..., 6].mean().item()*weights[6].item()
+            loss_dict["loss_joint"] = loss_joint
+            loss_dict["loss_gripper"] = loss_gripper
+        if feat_dim == 10:
+            weights[:3] = 10
+            weights[3:9] = 1
+            weights[9] = 0.2
+            loss_pos = loss[..., :3].mean().item()*weights[0].item()
+            loss_rot = loss[..., 3:9].mean().item()*weights[3].item()
+            loss_gripper = loss[..., 9].mean().item()*weights[9].item()
+            loss_dict["loss_pos"] = loss_pos
+            loss_dict["loss_rot"] = loss_rot
+            loss_dict["loss_gripper"] = loss_gripper
+
+        weighted_loss = loss * weights 
+        total_loss = reduce(weighted_loss, 'b ... -> b (...)', 'mean')
+        total_loss = total_loss.mean()
+        loss_dict["total_loss"] = total_loss.item()
+
+        return total_loss, loss_dict
 
 
 
