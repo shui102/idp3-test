@@ -10,7 +10,7 @@ from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 import diffusion_policy_3d.model.vision_3d.point_process as point_process
 from termcolor import cprint
 
-SELECTED_INDICES = [i for i in range(10)]
+SELECTED_INDICES = [i for i in range(7)]
 class RM65_Dataset3D(BaseDataset):
     def __init__(self,
             zarr_path, 

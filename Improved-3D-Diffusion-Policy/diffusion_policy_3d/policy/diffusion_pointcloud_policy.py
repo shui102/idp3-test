@@ -420,30 +420,31 @@ class DiffusionPointcloudPolicy(BasePolicy):
         loss = F.mse_loss(pred, target, reduction='none')
         loss = loss * loss_mask.type(loss.dtype)
         
-        
-        loss_x = loss[..., 0].mean()
-        loss_y = loss[..., 1].mean()
-        loss_z = loss[..., 2].mean()
-        loss_rot = loss[..., 3:9].mean()
-        loss_gripper = loss[..., 9].mean() 
-
         feat_dim = loss.shape[-1] 
         weights = torch.ones(feat_dim, device=loss.device, dtype=loss.dtype)
-        weights[:3] = 100
-        # weights[2] = 100 
-        weights[3:9] = 1
-        weights[9] = 0.1
+        # loss_x = loss[..., 0].mean()
+        # loss_y = loss[..., 1].mean()
+        # loss_z = loss[..., 2].mean()
+        # loss_rot = loss[..., 3:9].mean()
+        # loss_gripper = loss[..., 9].mean() 
+
+        # feat_dim = loss.shape[-1] 
+        # weights = torch.ones(feat_dim, device=loss.device, dtype=loss.dtype)
+        # weights[:3] = 1
+        # # weights[2] = 100 
+        # weights[3:9] = 1
+        # weights[9] = 1
         weighted_loss = loss * weights 
         total_loss = reduce(weighted_loss, 'b ... -> b (...)', 'mean')
         total_loss = total_loss.mean()
 
         loss_dict = {
             'bc_loss': total_loss.item(),      # 总 loss (已加权)
-            'x_loss': loss_x.item()*weights[0].item(),           # x 维度 loss (未加权)
-            'y_loss': loss_y.item()*weights[1].item(),           # y 维度 loss (未加权)
-            'z_loss': loss_z.item()*weights[2].item(),           # z 维度 loss (未加权)
-            'rot_loss': loss_rot.item()*weights[3].item(),         # rot 维度 loss (未加权)
-            'gripper_loss': loss_gripper.item()*weights[9].item(), # gripper 维度 loss (未加权)
+            # 'x_loss': loss_x.item()*weights[0].item(),           # x 维度 loss (未加权)
+            # 'y_loss': loss_y.item()*weights[1].item(),           # y 维度 loss (未加权)
+            # 'z_loss': loss_z.item()*weights[2].item(),           # z 维度 loss (未加权)
+            # 'rot_loss': loss_rot.item()*weights[3].item(),         # rot 维度 loss (未加权)
+            # 'gripper_loss': loss_gripper.item()*weights[9].item(), # gripper 维度 loss (未加权)
         }
 
         return total_loss, loss_dict

@@ -599,7 +599,7 @@ def main(cfg: OmegaConf):
     first_init = True
     record_data = True
 
-    env = RM65Inference(camera=cam, agent=action_agent, mode="pose10d",obs_horizon=2, 
+    env = RM65Inference(camera=cam, agent=action_agent, mode="jointangle",obs_horizon=2, 
                         action_horizon=action_horizon, device="cpu",
                         use_point_cloud=use_point_cloud, use_image=False)
     

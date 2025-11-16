@@ -135,7 +135,7 @@ logging:
   id: null
   mode: online
   name: ${training.seed}
-  project: train_10dpose_at_11142218
+  project: train_joint_at_11151613
   resume: true
   tags:
   - train_diffusion_unet_hybrid
