@@ -142,23 +142,53 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
             if pretrained_unet_path.endswith(".ckpt"):
                 ckpt = torch.load(pretrained_unet_path, map_location="cpu",weights_only=False)
 
-                # Lightning 保存格式兼容
-                if "state_dict" in ckpt:
-                    unet_state = ckpt["state_dict"]
-                elif "state_dicts" in ckpt:
-                    # 如果包含多个模块（如 ema、model、optimizer）
-                    unet_state = ckpt["state_dicts"].get("model", ckpt["state_dicts"])
-                else:
-                    unet_state = ckpt
-            else:
-                unet_state = torch.load(pretrained_unet_path, map_location="cpu")
+            #     # Lightning 保存格式兼容
+            #     if "state_dict" in ckpt:
+            #         unet_state = ckpt["state_dict"]
+            #     elif "state_dicts" in ckpt:
+            #         # 如果包含多个模块（如 ema、model、optimizer）
+            #         unet_state = ckpt["state_dicts"].get("model", ckpt["state_dicts"])
+            #     else:
+            #         unet_state = ckpt
+            # else:
+            #     unet_state = torch.load(pretrained_unet_path, map_location="cpu")
 
-            missing, unexpected = self.model.unet.load_state_dict(unet_state, strict=False)
-            print(f"[ControlNet] loaded pretrained UNet with {len(missing)} missing and {len(unexpected)} unexpected keys")
+            raw_state = ckpt["state_dicts"]["model"]
+
+            # 去掉前缀 'model.' 以匹配 ConditionalUnet1D
+            clean_state = {}
+            encoder_dict = {}
+            self.normalizer_state = {}
+            for k, v in raw_state.items():
+                if k.startswith("model."):
+                    clean_state[k.replace("model.", "")] = v
+                elif k.startswith("obs_encoder_stage1."):
+                    # 去掉前缀，直接加载给 self.obs_encoder_stage1
+                    clean_k = k.replace("obs_encoder_stage1.", "")
+                    encoder_dict[clean_k] = v
+                elif k.startswith("normalizer."):
+                    # 去掉 "normalizer." 前缀
+                    # 例如: "normalizer.params_dict.action.offset" -> "params_dict.action.offset"
+                    clean_k = k.replace("normalizer.", "")
+                    self.normalizer_state[clean_k] = v
+                else:
+                    clean_state[k] = v
+            missing, unexpected = self.model.unet.load_state_dict(clean_state, strict=False)
+            cprint(f"[ControlNet] loaded pretrained UNet with {len(missing)} missing and {len(unexpected)} unexpected keys","red")
 
             for p in self.model.unet.parameters():
                 p.requires_grad = False
             cprint("[ControlNet] UNet is frozen. Only training ControlNet branch.", "yellow")
+            if len(encoder_dict) > 0:
+            # 注意：这里要加 strict=False，因为 obs_encoder 可能包含一些不需要的 buffer
+                missing, unexpected = self.obs_encoder_stage1.load_state_dict(encoder_dict, strict=False)
+                cprint(f"[ControlNet] Stage1 Obs Encoder loaded.missing {len(missing)},unexpected {len(unexpected)}", "green")
+            else:
+                cprint("[ControlNet] ❌ 警告：未在 checkpoint 中找到 Obs Encoder 权重！请确认 Stage 1 保存逻辑是否保存了整个 Policy。", "red")
+                cprint("[ControlNet] 如果继续，Encoder 将是随机初始化的，训练将失败。", "red")
+
+            for param in self.obs_encoder_stage1.parameters():
+                param.requires_grad = False
 
         self.noise_scheduler = noise_scheduler
         self.mask_generator = LowdimMaskGenerator(
@@ -327,6 +357,15 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
     # ====================== Normalizer ======================
     def set_normalizer(self, normalizer: LinearNormalizer):
         self.normalizer.load_state_dict(normalizer.state_dict())
+        if self.train_stage == "controlnet":
+            controlnet_state = normalizer.state_dict()
+            unet_state = self.normalizer_state.copy()    
+            
+            for k, v in controlnet_state.items():
+                if k in unet_state:
+                    controlnet_state[k] = v  
+            missing, unexpected = self.normalizer.load_state_dict(controlnet_state, strict=False)
+
 
     # ====================== 训练 Loss ======================
     def compute_loss(self, batch):

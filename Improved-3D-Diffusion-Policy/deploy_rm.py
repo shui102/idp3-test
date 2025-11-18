@@ -359,11 +359,11 @@ class MaskPointCloudExtractor:
         if self.tracker is None:
             raise RuntimeError("Tracker 尚未初始化，请先调用 init_tracker().")
 
-        process_img, mask_array = self.tracker.add_image(rgb)
+        process_img, mask_array,json_metadata = self.tracker.add_image(rgb)
         if process_img is None or not isinstance(process_img, np.ndarray):
             cprint("[Warning] Tracker返回空 mask。","yellow")
             return np.zeros((self.camera.height, self.camera.width), dtype=np.uint8)
-        return mask_array
+        return mask_array,json_metadata
 
 
     def extract_pcs_from_frame(self, rgb_array, depth_array, qpos_array):
@@ -465,8 +465,8 @@ class RM65Inference:
         self.frame_lock = threading.Lock()
 
         self.extractor.init_tracker(
-            api_token="a06fd6f7e5c5cb3586bad2ac1b40597f",
-            prompt_text="blue-paper-cup. white-basket.",
+            api_token="1d1ce8722348466d900d1898278ef20f",
+            prompt_text="brown-paper-cup. white-basket.",
             detection_interval=1000
         )
 
@@ -599,7 +599,7 @@ def main(cfg: OmegaConf):
     first_init = True
     record_data = True
 
-    env = RM65Inference(camera=cam, agent=action_agent, mode="jointangle",obs_horizon=2, 
+    env = RM65Inference(camera=cam, agent=action_agent, mode="pose10d",obs_horizon=2, 
                         action_horizon=action_horizon, device="cpu",
                         use_point_cloud=use_point_cloud, use_image=False)
     

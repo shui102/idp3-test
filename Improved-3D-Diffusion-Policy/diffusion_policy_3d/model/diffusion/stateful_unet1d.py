@@ -12,6 +12,7 @@ IDP3 Conditional Unet + ControlNet (Control input = 1024-d)
 
 from typing import Union
 import logging
+from termcolor import cprint
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -362,6 +363,9 @@ class ConditionalControlUnet1D(nn.Module):
             use_up_condition=use_up_condition,
         )
 
+        for param in self.unet.parameters():
+            param.requires_grad = False
+
         # --------- ControlNet 结构 ---------
         all_dims = [input_dim] + list(down_dims)
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
@@ -464,7 +468,8 @@ class ConditionalControlUnet1D(nn.Module):
         # --- Step 5. ControlNet 编码器 ---
         ctrl = self.control_proj(control_input)           # [B, C_in]
         ctrl = ctrl.unsqueeze(-1).expand(-1, -1, T)       # [B, C_in, T]
-        x_ctrl = sample + ctrl
+        # x_ctrl = sample + ctrl
+        x_ctrl = ctrl
         h_ctrl = []
         for res1, res2, down in self.ctrl_downs:
             x_ctrl = res1(x_ctrl, global_feature)
@@ -490,6 +495,7 @@ class ConditionalControlUnet1D(nn.Module):
             #     x = x + h_local[1]
             x = res2(x, global_feature)
             x = x + x_hat
+            # cprint(f"x_hat:{x_hat}", 'red')
             x = up(x)
 
         # --- Step 9. 输出 ---

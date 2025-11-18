@@ -10,7 +10,7 @@ _target_: diffusion_policy_3d.workspace.controlnet_workspace.iDP3ControlNetWorks
 training:
   seed: 42
   device: "cuda:0"
-  mode: "stage1"       # 可选: stage1 / stage2 / two_stage
+  mode: "stage2"       # 可选: stage1 / stage2 / two_stage
   debug: false            # 若为 true，仅跑少量 batch 用于验证数据流
 
 stage1:
@@ -44,9 +44,9 @@ stage1:
   policy:
     _target_: diffusion_policy_3d.policy.controlnet_policy.DiffusionPointcloudControlPolicy
     shape_meta:
-      action: {shape: [7,]}
+      action: {shape: [10,]}
       obs:
-        agent_pos: {shape: [7,]}
+        agent_pos: {shape: [10,]}
         point_cloud: {shape: [4096, 6]}
       control:
         point_cloud: {shape: [1024, 3]}   # Stage1不会用到
@@ -141,17 +141,17 @@ stage2:
       seed: 42
       val_ratio: 0.00
       max_train_episodes: 90
-      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed_joint.zarr"
+      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/stage2_with_box.zarr"
 
   dataloader:
     # batch_size: 120
-    batch_size: 64
+    batch_size: 48
     num_workers: 16
     shuffle: True
     pin_memory: True
     persistent_workers: True
   val_dataloader:
-    batch_size: 64
+    batch_size: 48
     num_workers: 16
     shuffle: False
     pin_memory: True
@@ -161,9 +161,9 @@ stage2:
   policy:
     _target_: diffusion_policy_3d.policy.controlnet_policy.DiffusionPointcloudControlPolicy
     shape_meta:
-      action: {shape: [10]}
+      action: {shape: [7]}
       obs:
-        agent_pos: {shape: [10]}
+        agent_pos: {shape: [7]}
         point_cloud: {shape: [4096, 6]}
       control:
         control_point_cloud: {shape: [1024, 3]}
@@ -186,7 +186,7 @@ stage2:
       set_alpha_to_one: True
       steps_offset: 0
       prediction_type: sample
-    pretrained_unet_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-_seed0/checkpoints_stage1/epoch=0200-test_mean_score=-0.060.ckpt"    
+    pretrained_unet_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-put_brown_cup_controlnet_stage1_1116-2105_seed0/checkpoints_stage1/epoch=0200-test_mean_score=-0.195.ckpt"    
     stage1_pointcloud_encoder_cfg:
       in_channels: 6
       out_channels: 128

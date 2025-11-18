@@ -55,14 +55,14 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
             self.optimizer = hydra.utils.instantiate(_stage2.optimizer, params=self.model.parameters())
             self.ema = hydra.utils.instantiate(_stage2.ema, model=self.ema_model) if _stage2.training.use_ema else None
 
-    def _train_stage(self, stage_name, stage_cfg, dataset, val_dataset, lr_scheduler):
+    def _train_stage(self, stage_name, stage_cfg, dataset, val_dataset, model, ema_model, optimizer, lr_scheduler, ema):
         device = torch.device(stage_cfg.training.device)
         dataloader = DataLoader(dataset, **stage_cfg.dataloader)
         val_dataloader = DataLoader(val_dataset, **stage_cfg.val_dataloader)
-        self.model.to(device)
-        if self.ema_model:
-            self.ema_model.to(device)
-        optimizer_to(self.optimizer, device)
+        model.to(device)
+        if ema_model:
+            ema_model.to(device)
+        optimizer_to(optimizer, device)
 
         # 日志系统
         cprint(f"-----------------------------", "yellow")
@@ -95,18 +95,18 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                         train_sampling_batch = batch
 
                     # Compute loss
-                    raw_loss, loss_dict = self.model.compute_loss(batch)
+                    raw_loss, loss_dict = model.compute_loss(batch)
                     loss = raw_loss / stage_cfg.training.gradient_accumulate_every
                     loss.backward()
 
                     # Optimizer step
                     if self.global_step % stage_cfg.training.gradient_accumulate_every == 0:
-                        self.optimizer.step()
-                        self.optimizer.zero_grad()
+                        optimizer.step()
+                        optimizer.zero_grad()
                         lr_scheduler.step()
 
                     if stage_cfg.training.use_ema:
-                        self.ema.step(self.model)
+                        ema.step(model)
 
                     raw_loss_cpu = raw_loss.item()
                     train_losses.append(raw_loss_cpu)
@@ -131,12 +131,12 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 step_log['train_loss'] = train_loss 
                                
                 # ========== Validation ==========
-                policy = self.ema_model if stage_cfg.training.use_ema else self.model
+                policy = ema_model if stage_cfg.training.use_ema else model
                 policy.eval()
                 if(self.epoch % stage_cfg.training.val_every == 0):
                     with torch.no_grad():
                         val_losses = []
-                        for batch_idx, batch in enumerate(dataloader):
+                        for batch_idx, batch in enumerate(val_dataloader):
                             batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
                             obs, gt = batch["obs"], batch["action"]
                             if stage_name == "stage2":
@@ -196,7 +196,7 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
 
             lr_scheduler = get_scheduler(
                 _stage1.training.lr_scheduler,
-                optimizer=self.optimizer,
+                optimizer=optimizer,
                 num_warmup_steps=_stage1.training.lr_warmup_steps,
                 num_training_steps=(len(dataset) * _stage1.training.num_epochs) // _stage1.training.gradient_accumulate_every,
                 last_epoch=self.global_step - 1,
@@ -210,16 +210,16 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                     cprint(f"[Stage1] Resuming from checkpoint {lastest_ckpt_path}", "magenta")
                     self.load_checkpoint(path=lastest_ckpt_path,exclude_keys=["lr_scheduler"])
         
-            self.model.set_normalizer(normalizer)
-            if self.ema_model:
-                self.ema_model.set_normalizer(normalizer)
+            model.set_normalizer(normalizer)
+            if ema_model:
+                ema_model.set_normalizer(normalizer)
 
-            stage1_loss = self._train_stage("stage1", _stage1, dataset, val_dataset, lr_scheduler)
+            stage1_loss = self._train_stage("stage1", _stage1, dataset, val_dataset, model, ema_model, optimizer, lr_scheduler, ema)
             cprint(f"[Stage1] Finished. avg loss={stage1_loss:.6f}", "green")
 
             stage1_path = os.path.join(self.output_dir, "tmp", "pretrained_unet_stage1.pth")
             os.makedirs(os.path.dirname(stage1_path), exist_ok=True)
-            torch.save(self.model.model.state_dict(), stage1_path)
+            torch.save(model.model.state_dict(), stage1_path)
             cprint(f"[Stage1] UNet saved to {stage1_path}", "magenta")
 
             if mode == "two_stage" and not cfg.training.resume:
@@ -259,12 +259,12 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
             
             lr_scheduler = get_scheduler(
                 _stage2.training.lr_scheduler,
-                optimizer=self.optimizer,
+                optimizer=optimizer,
                 num_warmup_steps=_stage2.training.lr_warmup_steps,
                 num_training_steps=(len(dataset) * _stage2.training.num_epochs) // _stage2.training.gradient_accumulate_every,
                 last_epoch=self.global_step - 1,
             )
-            ema = hydra.utils.instantiate(_stage2.ema, model=self.ema_model) if _stage2.training.use_ema else None
+            ema = hydra.utils.instantiate(_stage2.ema, model=ema_model) if _stage2.training.use_ema else None
             self.ema = ema
             if _stage2.training.resume:
                 lastest_ckpt_path = self.get_checkpoint_path()
@@ -275,22 +275,11 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                     cprint(f"[Stage2] Resume=True, but no checkpoint found. Starting from scratch.", "yellow")
 
 
-            self.model.set_normalizer(normalizer)
-            if self.ema_model:
-                self.ema_model.set_normalizer(normalizer)
+            model.set_normalizer(normalizer)
+            if ema_model:
+                ema_model.set_normalizer(normalizer)
 
-                        # 检查 unet 下是否还有可训练参数
-            trainable = []
-            for name, p in self.model.model.unet.named_parameters():
-                if p.requires_grad:
-                    trainable.append(name)
-            print("UNET trainable params:", len(trainable))
-            if len(trainable) > 0:
-                for n in trainable[:50]:
-                    print("  ", n)
-
-
-            stage2_loss = self._train_stage("stage2", _stage2, dataset, val_dataset, lr_scheduler)
+            stage2_loss = self._train_stage("stage2", _stage2, dataset, val_dataset, model, ema_model, optimizer, lr_scheduler, ema)
             cprint(f"[Stage2] Finished. avg loss={stage2_loss:.6f}", "green")
 
     # ==========================================================

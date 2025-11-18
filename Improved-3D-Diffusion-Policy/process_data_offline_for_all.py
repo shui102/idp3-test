@@ -358,7 +358,7 @@ class IncrementalObjectTracker:
         for obj_id, obj_info in self.last_mask_dict.labels.items():
             mask_img[obj_info.mask] = obj_id
         mask_array = mask_img.cpu().numpy()
-
+        json_metadata = self.last_mask_dict.to_dict()
         annotated_frame = self.visualize_frame_with_mask_and_metadata(
             image_np=image_np,
             mask_array=mask_array,
@@ -371,7 +371,7 @@ class IncrementalObjectTracker:
             torch.cuda.empty_cache()
 
         # print(f"[Tracker] Total processed frames: {self.total_frames}")
-        return annotated_frame, mask_array
+        return annotated_frame, mask_array, json_metadata
 
 
 
