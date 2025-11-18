@@ -341,6 +341,8 @@ class MaskPointCloudExtractor:
         self.camera = camera
         self.kin_helper = kin_helper
         self.tracker = None
+        self.CONTROL_OBJECT_NAMES = ["paper-box"]
+        self.TARGET_OBJECT_NAMES = ["brown-paper-cup", "white-basket"]
 
     def init_tracker(self, api_token, prompt_text, detection_interval=1000):
         self.tracker = IncrementalObjectTracker(
@@ -367,65 +369,123 @@ class MaskPointCloudExtractor:
 
 
     def extract_pcs_from_frame(self, rgb_array, depth_array, qpos_array):
+            if self.tracker is None:
+                raise RuntimeError("Tracker 尚未初始化，请先调用 init_tracker().")
 
-        if self.tracker is None:
-            raise RuntimeError("Tracker 尚未初始化，请先调用 init_tracker().")
+            obs_pcd_list = [] 
+            control_pcd_list = []    
+            
+            size = len(rgb_array)
+            if size != len(depth_array):
+                print(f"错误: RGB({size}) 和 Depth({len(depth_array)}) 长度不一致。")
+                return [], []
 
-        pcd_list = []
-        size = len(rgb_array)
-        if size != len(depth_array):
-            print(f"错误: RGB({size}) 和 Depth({len(depth_array)}) 长度不一致。")
-            return []
+            # === 内部辅助函数：提取点云 ===
+            # 增加 use_texture 参数：True则使用图片颜色，False则填充黑色(0,0,0)
+            def get_world_points_from_mask(mask_ids, current_mask_array, current_depth, current_rgb, use_texture=True):
+                if not mask_ids:
+                    return np.empty((0, 6)) 
+                
+                bool_mask = np.isin(current_mask_array, mask_ids)
+                
+                # 深度处理
+                masked_depth = (current_depth * bool_mask).astype(current_depth.dtype)
+                
+                # 投影到 3D
+                z_cam = masked_depth * self.camera.get_depth_scale()
+                intr = self.camera.get_intrinsics()
+                x_cam = (self.camera.uu - intr.ppx) * z_cam / intr.fx
+                y_cam = (self.camera.vv - intr.ppy) * z_cam / intr.fy
+                points_cam = np.stack([x_cam, y_cam, z_cam], axis=-1)
+                
+                # 过滤有效点
+                valid = (z_cam > 0) & (z_cam < 2.0)
+                points_cam_flat = points_cam[valid]
+                
+                if points_cam_flat.shape[0] == 0:
+                    return np.empty((0, 6))
 
-        for rgb_np, depth_np, qpos in zip(rgb_array, depth_array, qpos_array):
-            mask_array = self.gen_mask(rgb_np)
-            boolean_mask = (mask_array != 0)
+                # 颜色处理逻辑
+                if use_texture:
+                    # 使用原图纹理 (BGR -> RGB)
+                    colors_bgr_flat = current_rgb[valid]
+                    colors_rgb_flat = colors_bgr_flat[..., ::-1] / 255.0
+                else:
+                    # 不使用纹理，填充全黑 (0, 0, 0)
+                    # 如果想填充白色改成 np.ones_like...
+                    colors_rgb_flat = np.zeros((points_cam_flat.shape[0], 3), dtype=np.float32)
 
-            masked_depth = (depth_np * boolean_mask).astype(depth_np.dtype)
-            z_cam = masked_depth * self.camera.get_depth_scale()
+                # 转世界坐标
+                points_cam_homo = np.concatenate(
+                    [points_cam_flat, np.ones((points_cam_flat.shape[0], 1))], axis=1
+                )
+                world_homo = (self.camera.get_transform() @ points_cam_homo.T).T
+                world_xyz = world_homo[:, :3]
+                
+                return np.hstack([world_xyz, colors_rgb_flat])
 
-            intr = self.camera.get_intrinsics()
-            x_cam = (self.camera.uu - intr.ppx) * z_cam / intr.fx
-            y_cam = (self.camera.vv - intr.ppy) * z_cam / intr.fy
-            points_cam = np.stack([x_cam, y_cam, z_cam], axis=-1)
+            # === 主循环 ===
+            for rgb_np, depth_np, qpos in zip(rgb_array, depth_array, qpos_array):
+                mask_array, json_metadata = self.gen_mask(rgb_np)
+                
+                obs_object_ids = [] 
+                target_object_ids = []
+                
+                if json_metadata:
+                    try:
+                        labels = json_metadata.get("labels", {})
+                        for key, info in labels.items():
+                            cls_name = info.get("class_name")
+                            instance_id = int(info.get("instance_id"))
+                            
+                            if cls_name in self.CONTROL_OBJECT_NAMES:
+                                obs_object_ids.append(instance_id)
+                            if cls_name in self.TARGET_OBJECT_NAMES:
+                                target_object_ids.append(instance_id)
+                    except Exception as e:
+                        print(f"Metadata Warning: {e}")
 
-            valid = (z_cam > 0) & (z_cam < 2.0)
-            points_cam_flat = points_cam[valid]
-            colors_bgr_flat = rgb_np[valid]
+                # 1. 提取物体点云
+                # Target: 保留纹理 (use_texture=True)
+                target_xyzrgb = get_world_points_from_mask(
+                    target_object_ids, mask_array, depth_np, rgb_np, use_texture=True
+                )
+                
+                # Obs: 去除颜色 (use_texture=False)，点云颜色将变成纯黑
+                obs_xyzrgb = get_world_points_from_mask(
+                    obs_object_ids, mask_array, depth_np, rgb_np, use_texture=False
+                )
 
-            # BGR → RGB
-            colors_rgb_flat = colors_bgr_flat[..., ::-1] / 255.0
+                # 2. 生成机械臂(夹爪)点云
+                robot_joint_name = ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6']
+                q_rad = qpos[:6]
+                gripper_pts = self.kin_helper.get_ee_pcs_through_joint(
+                    robot_joint_name, q_rad, num_claw_pts=[500]
+                )
+                gripper_xyz = np.array(gripper_pts)
+                
+                # === 设置夹爪颜色为纯蓝 ===
+                # RGB: R=0, G=0, B=1
+                gripper_color = np.array([0.0, 0.0, 1.0]) 
+                gripper_colors = np.tile(gripper_color, (gripper_xyz.shape[0], 1))
+                
+                gripper_xyzrgb = np.hstack([gripper_xyz, gripper_colors]) \
+                    if gripper_xyz.shape[0] > 0 else np.empty((0, 6))
 
-            points_cam_homo = np.concatenate(
-                [points_cam_flat, np.ones((points_cam_flat.shape[0], 1))],
-                axis=1
-            )
-            world_homo = (self.camera.get_transform() @ points_cam_homo.T).T
-            world_xyz = world_homo[:, :3]
+                # 3. 组合与重采样
 
-            xyz_rgb = np.hstack([world_xyz, colors_rgb_flat]) \
-                if world_xyz.shape[0] > 0 else np.empty((0, 6))
+                # --- Target List (Target纹理 + 蓝色夹爪) ---
+                combined_target = np.vstack([target_xyzrgb, gripper_xyzrgb])
+                resampled_target = resample_point_cloud(combined_target, 4096) 
+                obs_pcd_list.append(resampled_target.astype(np.float32))
 
-            robot_joint_name = ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6']
-            q_rad = qpos[:6]
-            gripper_pts = self.kin_helper.get_ee_pcs_through_joint(
-                robot_joint_name,
-                q_rad,
-                num_claw_pts=[500]
-            )
-            gripper_xyz = np.array(gripper_pts)
+                # --- Obs List (黑色Obs + 蓝色夹爪) ---
+                # 这样网络只能看到障碍物的几何形状，看不到纹理，但能看到蓝色的夹爪位置
+                combined_obs = np.vstack([obs_xyzrgb, gripper_xyzrgb])
+                resampled_obs = resample_point_cloud(combined_obs, 1024)[:,:3] 
+                control_pcd_list.append(resampled_obs.astype(np.float32))
 
-            gripper_color = np.array([0.0, 0.0, 1.0])
-            gripper_colors = np.tile(gripper_color, (gripper_xyz.shape[0], 1))
-
-            gripper_xyz_rgb = np.hstack([gripper_xyz, gripper_colors]) \
-                if gripper_xyz.shape[0] > 0 else np.empty((0, 6))
-
-            combined = np.vstack([xyz_rgb, gripper_xyz_rgb])
-            resampled_pcd = resample_point_cloud(combined, 4096)
-            pcd_list.append(resampled_pcd.astype(np.float32))
-
-        return pcd_list
+            return obs_pcd_list, control_pcd_list
 
 class RM65Inference:
     def __init__(
@@ -466,7 +526,7 @@ class RM65Inference:
 
         self.extractor.init_tracker(
             api_token="1d1ce8722348466d900d1898278ef20f",
-            prompt_text="brown-paper-cup. white-basket.",
+            prompt_text="brown-paper-cup. white-basket.paper-box.",
             detection_interval=1000
         )
 
@@ -500,23 +560,27 @@ class RM65Inference:
         recent_depth = self.depth_array[-self.action_horizon:]
         recent_qpos = self.env_qpos_array[-self.action_horizon:]
 
-        pcs = self.extractor.extract_pcs_from_frame(
+        obs_pcs, control_pcs = self.extractor.extract_pcs_from_frame(
             recent_rgb, recent_depth, recent_qpos
         )
-        self.cloud_array.extend(pcs)
+        self.cloud_array.extend(obs_pcs)
+        self.control_cloud_array.extend(control_pcs)
         qpose_stack = np.stack(self.env_qpos_array[-self.obs_horizon:], axis=0)
         pose_stack = np.stack(self.pose_array[-self.obs_horizon:], axis=0)
         obs_cloud = np.stack(self.cloud_array[-self.obs_horizon:], axis=0)
+        control_obs_cloud = np.stack(self.control_cloud_array[-self.obs_horizon:], axis=0) 
 
         if self.mode == 'jointangle':
             obs_dict = {
                 'agent_pos': torch.from_numpy(qpose_stack).unsqueeze(0).to(self.device),
-                'point_cloud': torch.from_numpy(obs_cloud).unsqueeze(0).to(self.device)
+                'point_cloud': torch.from_numpy(obs_cloud).unsqueeze(0).to(self.device),
+                'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
             }
         if self.mode == 'pose10d':
             obs_dict = {
                 'agent_pos': torch.from_numpy(pose_stack).unsqueeze(0).to(self.device),
-                'point_cloud': torch.from_numpy(obs_cloud).unsqueeze(0).to(self.device)
+                'point_cloud': torch.from_numpy(obs_cloud).unsqueeze(0).to(self.device),
+                'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
             }
 
         cprint(f"[STEP] agent_pos shape: {obs_dict['agent_pos'].shape}", "red")
@@ -527,6 +591,7 @@ class RM65Inference:
         self.rgb_array = []
         self.depth_array = []
         self.cloud_array = []
+        self.control_cloud_array = []
         self.env_qpos_array = []
         self.action_array = []
         self.pose_array = []
@@ -551,20 +616,22 @@ class RM65Inference:
         while self.extractor.tracker is None:
             time.sleep(0.1)
 
-        obs_clouds = self.extractor.extract_pcs_from_frame(
+        obs_clouds,control_obs_clouds = self.extractor.extract_pcs_from_frame(
             rgb_stack, depth_stack, qpos_stack
         )
         self.cloud_array.append(obs_clouds[-1])
-
+        self.control_cloud_array.append(control_obs_clouds[-1])
         if self.mode == 'jointangle':
             obs_dict = {
                 'agent_pos': torch.from_numpy(qpos_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(np.array(obs_clouds)).unsqueeze(0).to(self.device),
+                'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
             }
         if self.mode == 'pose10d':
             obs_dict = {
                 'agent_pos': torch.from_numpy(pose_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(np.array(obs_clouds)).unsqueeze(0).to(self.device),
+                'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
             }
 
         cprint(f"[RESET] agent_pos: {obs_dict['agent_pos']}", "red")
@@ -599,7 +666,7 @@ def main(cfg: OmegaConf):
     first_init = True
     record_data = True
 
-    env = RM65Inference(camera=cam, agent=action_agent, mode="pose10d",obs_horizon=2, 
+    env = RM65Inference(camera=cam, agent=action_agent, mode="jointangle",obs_horizon=2, 
                         action_horizon=action_horizon, device="cpu",
                         use_point_cloud=use_point_cloud, use_image=False)
     
