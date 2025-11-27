@@ -16,7 +16,7 @@ import open3d as o3d
 from process_data_offline_for_all import IncrementalObjectTracker
 from depth_workflow_for_all import KinHelper, resample_point_cloud
 from scipy.spatial.transform import Rotation as R
-from realman65.my_robot.realman_65_interface import Realman65Interface
+from realman65.my_robot.realman_65_interface_dual import Realman65Interface
 import copy
 
 os.environ['WANDB_SILENT'] = "True"
@@ -259,13 +259,16 @@ class ActionAgent:
         try:
             self.rm_interface.reset()
             cprint("RM65 robot reset completed.", "green")
+            # 启动双臂连续控制线程
+            self.rm_interface.start_control()
         except Exception as exc:
             cprint(f"Failed to reset RM65 robot: {exc}", "yellow")
 
         self._gripper_threshold = gripper_threshold
         self._last_gripper_state = None
 
-        self.joint_qpos = np.zeros(7, dtype=np.float32)
+        # 双臂关节状态缓存：[LJ1..LJ6, LGrip, RJ1..RJ6, RGrip]
+        self.joint_qpos = np.zeros(14, dtype=np.float32)
         self.pose = np.zeros(10, dtype=np.float32)
 
         self._run_state_thread = True
@@ -283,22 +286,44 @@ class ActionAgent:
             raise ValueError(f"Unknown mode: {mode}")
 
     def _execute_action_angle(self, action):
+        # 6+1+6+1=14 6个关节+1个夹爪+6个关节+1个夹爪=14
         action_np = np.asarray(action, dtype=np.float64).flatten()
-        if action_np.size < 6:
-            raise ValueError("Action dim must be >= 6 for angle control.")
+        if action_np.size < 14:
+            raise ValueError("Action dim must be >= 14 for angle control.")
 
-        target_rad_angle = action_np[:6]
+        # 约定 14D: [LJ1..LJ6, LGrip, RJ1..RJ6, RGrip]
+        left_rad = None
+        left_grip = None
+        right_rad = None
+        right_grip = None
+
+        if action_np.size >= 14:
+            left_rad = action_np[:6]
+            left_grip = action_np[6]
+            right_rad = action_np[7:13]
+            right_grip = action_np[13]
         try:
-            self.rm_interface.target_joint_angles = target_rad_angle
+            # 下发双臂关节角（弧度）
+            if left_rad is not None:
+                self.rm_interface.target_joint_angles_left = left_rad
+            if right_rad is not None:
+                self.rm_interface.target_joint_angles_right = right_rad
             if not self.rm_interface.init_ik:
                 self.rm_interface.init_ik = True
         except Exception as exc:
-            cprint(f"[Angle] Failed to apply pose command: {exc}", "red")
+            cprint(f"[Angle] Failed to apply joint command: {exc}", "red")
 
-        # ---- Gripper ----
-        if action_np.size >= 7:
-            gripper_val = action_np[6]
-            self._apply_gripper(gripper_val)
+        # ---- Gripper (两侧) ----
+        if left_grip is not None:
+            try:
+                self.rm_interface.set_gripper("left_arm", 1 if left_grip >= self._gripper_threshold else 0)
+            except Exception as exc:
+                cprint(f"Failed to apply left gripper command: {exc}", "yellow")
+        if right_grip is not None:
+            try:
+                self.rm_interface.set_gripper("right_arm", 1 if right_grip >= self._gripper_threshold else 0)
+            except Exception as exc:
+                cprint(f"Failed to apply right gripper command: {exc}", "yellow")
 
     def _execute_action_pose(self, action):
         action_np = np.asarray(action, dtype=np.float64).flatten()
@@ -348,19 +373,26 @@ class ActionAgent:
                 joint_dict = self.rm_interface.get_joint_angles()
                 eepose_dict = self.rm_interface.get_end_effector_pose()
                 gripper_dict = self.rm_interface.get_gripper_state()
-                gripper_state = None
+                gripper_state_left = None
+                gripper_state_right = None
 
                 # ---- Joint angles ----
                 if joint_dict:
                     left_arm_angles = joint_dict.get("left_arm")
                     if left_arm_angles is not None:
                         self.joint_qpos[:6] = np.radians(left_arm_angles).astype(np.float32)
+                    right_arm_angles = joint_dict.get("right_arm")
+                    if right_arm_angles is not None:
+                        self.joint_qpos[7:13] = np.radians(right_arm_angles).astype(np.float32)
 
                 # ---- Gripper ----
                 if gripper_dict:
-                    gripper_state = gripper_dict.get("left_arm")
-                    if gripper_state is not None:
-                        self.joint_qpos[6] = gripper_state
+                    gripper_state_left = gripper_dict.get("left_arm")
+                    if gripper_state_left is not None:
+                        self.joint_qpos[6] = gripper_state_left
+                    gripper_state_right = gripper_dict.get("right_arm")
+                    if gripper_state_right is not None:
+                        self.joint_qpos[13] = gripper_state_right
 
                 # ---- Pose ----
                 if eepose_dict:
@@ -375,8 +407,8 @@ class ActionAgent:
                         self.pose[0:3] = xyz
                         self.pose[3:9] = rotation_6d
 
-                if gripper_state is not None:
-                    self.pose[9] = float(gripper_state)
+                if gripper_state_left is not None:
+                    self.pose[9] = float(gripper_state_left)
 
             except Exception as exc:
                 cprint(f"Failed to read sensor data: {exc}", "yellow")

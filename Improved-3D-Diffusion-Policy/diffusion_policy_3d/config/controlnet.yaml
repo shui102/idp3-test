@@ -24,7 +24,7 @@ stage1:
       seed: 42
       val_ratio: 0.00
       max_train_episodes: 90
-      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11092057_processed_joint.zarr"
+      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11221826_processed.zarr"
 
   dataloader:
     # batch_size: 120
@@ -44,9 +44,9 @@ stage1:
   policy:
     _target_: diffusion_policy_3d.policy.controlnet_policy.DiffusionPointcloudControlPolicy
     shape_meta:
-      action: {shape: [10,]}
+      action: {shape: [14,]}
       obs:
-        agent_pos: {shape: [10,]}
+        agent_pos: {shape: [14,]}
         point_cloud: {shape: [4096, 6]}
       control:
         point_cloud: {shape: [1024, 3]}   # Stage1不会用到
@@ -97,12 +97,12 @@ stage1:
     resume: True
     lr_scheduler: cosine
     lr_warmup_steps: 500
-    num_epochs: 1000
+    num_epochs: 100
     gradient_accumulate_every: 1
     use_ema: True
     rollout_every: 400
-    checkpoint_every: 50
-    val_every: 50
+    checkpoint_every: 25 
+    val_every: 25
     sample_every: 5
     max_train_steps: null
     max_val_steps: null
@@ -119,12 +119,12 @@ stage1:
     topk:
       monitor_key: test_mean_score
       mode: max
-      k: 1
+      k: 2
       format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
     save_last_ckpt: True # this only saves when save_ckpt is True
     save_last_snapshot: False
   logging:
-    project: "iDP3-ControlNet"
+    project: "yellow-box-11230113"
     group: "run"
     name: "stage1-exp"
 
@@ -141,7 +141,7 @@ stage2:
       seed: 42
       val_ratio: 0.00
       max_train_episodes: 90
-      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/stage2_with_box.zarr"
+      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11221826_processed.zarr"
 
   dataloader:
     # batch_size: 120
@@ -161,9 +161,9 @@ stage2:
   policy:
     _target_: diffusion_policy_3d.policy.controlnet_policy.DiffusionPointcloudControlPolicy
     shape_meta:
-      action: {shape: [7]}
+      action: {shape: [14]}
       obs:
-        agent_pos: {shape: [7]}
+        agent_pos: {shape: [14]}
         point_cloud: {shape: [4096, 6]}
       control:
         control_point_cloud: {shape: [1024, 3]}
@@ -186,7 +186,7 @@ stage2:
       set_alpha_to_one: True
       steps_offset: 0
       prediction_type: sample
-    pretrained_unet_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-put_brown_cup_controlnet_stage1_1116-2105_seed0/checkpoints_stage1/epoch=0200-test_mean_score=-0.195.ckpt"    
+    pretrained_unet_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-DMP_controlnet_stage2_put_blue_cup_1126-1511_seed0/checkpoints/latest.ckpt" #"/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-DMP_controlnet_stage1_put_blue_cup_1126-1423_seed0/checkpoints/latest.ckpt"    
     stage1_pointcloud_encoder_cfg:
       in_channels: 6
       out_channels: 128
@@ -201,7 +201,7 @@ stage2:
   # -------- Optimizer & Scheduler --------
   optimizer:
     _target_: torch.optim.AdamW
-    lr: 1.0e-5
+    lr: 5.0e-5
     betas: [0.95, 0.999]
     eps: 1.0e-8
     weight_decay: 1.0e-4
@@ -212,12 +212,12 @@ stage2:
     resume: True
     lr_scheduler: cosine
     lr_warmup_steps: 500
-    num_epochs: 1000
+    num_epochs: 25
     gradient_accumulate_every: 1
     use_ema: True
     rollout_every: 400
-    checkpoint_every: 50
-    val_every: 50
+    checkpoint_every: 25
+    val_every: 25
     sample_every: 5
     max_train_steps: null
     max_val_steps: null
@@ -239,6 +239,6 @@ stage2:
     save_last_ckpt: True # this only saves when save_ckpt is True
     save_last_snapshot: False
   logging:
-    project: "iDP3-ControlNet"
+    project: "yellow-box-11230113"
     group: "run"
     name: "stage2-exp"

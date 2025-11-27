@@ -13,7 +13,7 @@ from diffusion_policy_3d.model.common.normalizer import (
 from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 import diffusion_policy_3d.model.vision_3d.point_process as point_process
 
-SELECTED_INDICES = [i for i in range(7)]
+SELECTED_INDICES = [i for i in range(14)]
 class RM65_Dataset3D_Stage(BaseDataset):
     """
     两阶段数据加载器:

@@ -137,7 +137,7 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
             assert pretrained_unet_path is not None, \
                 "ControlNet 阶段需要提供 pretrained_unet_path（上一阶段训练好的 Unet 权重）"
             cprint(f"[ControlNet] Loading pretrained UNet from: {pretrained_unet_path}", "yellow")
-            unet_state = torch.load(pretrained_unet_path, map_location="cpu", weights_only=False)
+            # unet_state = torch.load(pretrained_unet_path, map_location="cpu", weights_only=False)
             # self.model.unet.load_state_dict(unet_state, strict=True)
             if pretrained_unet_path.endswith(".ckpt"):
                 ckpt = torch.load(pretrained_unet_path, map_location="cpu",weights_only=False)
@@ -479,6 +479,16 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
             loss_dict["loss_pos"] = loss_pos
             loss_dict["loss_rot"] = loss_rot
             loss_dict["loss_gripper"] = loss_gripper
+        if feat_dim == 14:
+            weights[:6] = 1
+            weights[6] = 0.2
+            weights[7:13] = 1
+            weights[13] = 0.2
+            loss_joint = loss[..., :6].mean().item()*weights[0].item() + loss[..., 7:13].mean().item()*weights[7].item()
+            loss_gripper = loss[..., 6].mean().item()*weights[6].item() + loss[..., 13].mean().item()*weights[13].item()
+            loss_dict["loss_joint"] = loss_joint
+            loss_dict["loss_gripper"] = loss_gripper
+
 
         weighted_loss = loss * weights 
         total_loss = reduce(weighted_loss, 'b ... -> b (...)', 'mean')

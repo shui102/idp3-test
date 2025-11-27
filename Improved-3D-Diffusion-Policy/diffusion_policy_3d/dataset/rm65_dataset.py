@@ -28,7 +28,8 @@ class RM65_Dataset3D(BaseDataset):
         self.task_name = task_name
         self.num_points = num_points
 
-        buffer_keys = ['state', 'action']
+        # buffer_keys = ['state', 'action']
+        buffer_keys = ['state']
         buffer_keys.append('point_cloud')
 
         self.replay_buffer = ReplayBuffer.copy_from_path(
@@ -71,7 +72,7 @@ class RM65_Dataset3D(BaseDataset):
     # ✅ 修改点1: 归一化阶段只用前7维 action / agent_qpos
     # =========================================================
     def get_normalizer(self, mode='limits', **kwargs):
-        action_7d = self.replay_buffer['action'][..., SELECTED_INDICES]
+        action_7d = self.replay_buffer['state'][..., SELECTED_INDICES]
         agent_pos_7d = self.replay_buffer['state'][..., SELECTED_INDICES]  # ✅ 改名保持一致
 
         data = {
@@ -106,7 +107,7 @@ class RM65_Dataset3D(BaseDataset):
     def _sample_to_data(self, sample):
         # 截取前7维 agent_pos / action
         agent_pos = sample['state'][..., SELECTED_INDICES].astype(np.float32)
-        action = sample['action'][..., SELECTED_INDICES].astype(np.float32)
+        action = sample['state'][..., SELECTED_INDICES].astype(np.float32)
 
         # 点云下采样
         point_cloud = sample['point_cloud'].astype(np.float32)

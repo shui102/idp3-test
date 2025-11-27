@@ -117,8 +117,8 @@ training:
   debug: False
   resume: True
   lr_scheduler: cosine
-  lr_warmup_steps: 500
-  num_epochs: 1000
+  lr_warmup_steps: 1000
+  num_epochs: 500
   gradient_accumulate_every: 1
   use_ema: True
   rollout_every: 400
@@ -135,7 +135,7 @@ logging:
   id: null
   mode: online
   name: ${training.seed}
-  project: train_joint_at_11151613
+  project: DMP-blue-cup-idp3-11241831
   resume: true
   tags:
   - train_diffusion_unet_hybrid

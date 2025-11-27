@@ -1,0 +1,27 @@
+name: rm65_task
+
+shape_meta: &shape_meta
+  obs:
+    image:
+      shape: [3, 224, 224]
+      type: rgb
+      horizon: 2
+    agent_pos:
+      shape: [7]
+      type: low_dim
+      horizon: 2
+  action:
+    shape: [7]
+    horizon: 16
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.rm65_image_dataset.RM65DatasetImage
+  zarr_path: /home/shui/your_rm65_image_dataset.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.05
+  max_train_episodes: 90
+  use_img: true
+  use_depth: false
