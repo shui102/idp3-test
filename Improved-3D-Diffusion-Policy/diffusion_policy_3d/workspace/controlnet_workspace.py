@@ -198,7 +198,7 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 _stage1.training.lr_scheduler,
                 optimizer=self.optimizer,
                 num_warmup_steps=_stage1.training.lr_warmup_steps,
-                num_training_steps=(len(dataset) * _stage1.training.num_epochs) // _stage1.training.gradient_accumulate_every,
+                num_training_steps=(len(dataset) * _stage1.training.num_epochs / _stage1.dataloader.batch_size) // _stage1.training.gradient_accumulate_every,
                 last_epoch=self.global_step - 1,
             )
             ema = hydra.utils.instantiate(_stage1.ema, model=ema_model) if _stage1.training.use_ema else None            
@@ -261,7 +261,7 @@ class iDP3ControlNetWorkspace(BaseWorkspace):
                 _stage2.training.lr_scheduler,
                 optimizer=self.optimizer,
                 num_warmup_steps=_stage2.training.lr_warmup_steps,
-                num_training_steps=(len(dataset) * _stage2.training.num_epochs) // _stage2.training.gradient_accumulate_every,
+                num_training_steps=(len(dataset) * _stage2.training.num_epochs /  _stage2.dataloader.batch_size) // _stage2.training.gradient_accumulate_every,
                 last_epoch=self.global_step - 1,
             )
             ema = hydra.utils.instantiate(_stage2.ema, model=self.ema_model) if _stage2.training.use_ema else None

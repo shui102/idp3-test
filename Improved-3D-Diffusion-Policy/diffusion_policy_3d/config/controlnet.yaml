@@ -21,10 +21,11 @@ stage1:
       horizon: ${stage1.policy.horizon}
       pad_before: ${eval:'${stage1.policy.n_obs_steps}-1'}
       pad_after: ${eval:'${stage1.policy.n_action_steps}-1'}
+      max_duration: 2e4
       seed: 42
       val_ratio: 0.00
       max_train_episodes: 90
-      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11221826_processed.zarr"
+      zarr_path: "/home/shui/DMP_gen/final_merged_dataset/merged_dataset_total.zarr"
 
   dataloader:
     # batch_size: 120
@@ -97,7 +98,7 @@ stage1:
     resume: True
     lr_scheduler: cosine
     lr_warmup_steps: 500
-    num_epochs: 100
+    num_epochs: 301
     gradient_accumulate_every: 1
     use_ema: True
     rollout_every: 400
@@ -124,7 +125,7 @@ stage1:
     save_last_ckpt: True # this only saves when save_ckpt is True
     save_last_snapshot: False
   logging:
-    project: "yellow-box-11230113"
+    project: "11302044-DMP_augmented_dualarm"
     group: "run"
     name: "stage1-exp"
 
@@ -139,19 +140,20 @@ stage2:
       pad_before: ${eval:'${stage1.policy.n_obs_steps}-1'}
       pad_after: ${eval:'${stage1.policy.n_action_steps}-1'}
       seed: 42
+      max_duration: 2e4
       val_ratio: 0.00
-      max_train_episodes: 90
-      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_11221826_processed.zarr"
+      max_train_episodes: 200
+      zarr_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_1130_original.zarr"
 
   dataloader:
     # batch_size: 120
-    batch_size: 48
+    batch_size: 32
     num_workers: 16
     shuffle: True
     pin_memory: True
     persistent_workers: True
   val_dataloader:
-    batch_size: 48
+    batch_size: 32
     num_workers: 16
     shuffle: False
     pin_memory: True
@@ -186,7 +188,7 @@ stage2:
       set_alpha_to_one: True
       steps_offset: 0
       prediction_type: sample
-    pretrained_unet_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-DMP_controlnet_stage2_put_blue_cup_1126-1511_seed0/checkpoints/latest.ckpt" #"/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-DMP_controlnet_stage1_put_blue_cup_1126-1423_seed0/checkpoints/latest.ckpt"    
+    pretrained_unet_path: "/home/shui/idp3_test/Improved-3D-Diffusion-Policy/Improved-3D-Diffusion-Policy/data/outputs/-controlnet-DMP_dualarm_augment_stage1_12011325_seed0/checkpoints/latest.ckpt"    
     stage1_pointcloud_encoder_cfg:
       in_channels: 6
       out_channels: 128
@@ -212,7 +214,7 @@ stage2:
     resume: True
     lr_scheduler: cosine
     lr_warmup_steps: 500
-    num_epochs: 25
+    num_epochs: 151
     gradient_accumulate_every: 1
     use_ema: True
     rollout_every: 400
@@ -239,6 +241,6 @@ stage2:
     save_last_ckpt: True # this only saves when save_ckpt is True
     save_last_snapshot: False
   logging:
-    project: "yellow-box-11230113"
+    project: "12020030-augmented-DMP-stage2"
     group: "run"
     name: "stage2-exp"
