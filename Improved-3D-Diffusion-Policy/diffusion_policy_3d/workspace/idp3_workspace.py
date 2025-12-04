@@ -239,7 +239,7 @@ class iDP3Workspace(BaseWorkspace):
                     with torch.no_grad():                        
                         train_losses = list()
                         
-                        for batch_idx, batch in enumerate(val_dataloader):
+                        for batch_idx, batch in enumerate(train_dataloader):
                             batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True) if isinstance(x, torch.Tensor) else x)
                             obs_dict = batch['obs']
                             gt_action = batch['action']
