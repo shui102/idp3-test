@@ -40,7 +40,7 @@ export CUDA_VISIBLE_DEVICES=${gpu_id}
 #                             task.dataset.zarr_path=$dataset_path 
 
 
-python deploy_rm.py --config-name=${config_name}.yaml \
+python deploy_rm_dual.py --config-name=${config_name}.yaml \
                             task=${task_name} \
                             hydra.run.dir=${run_dir} \
                             training.debug=$DEBUG \

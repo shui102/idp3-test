@@ -10,7 +10,7 @@ from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 import diffusion_policy_3d.model.vision_3d.point_process as point_process
 from termcolor import cprint
 
-SELECTED_INDICES = [i for i in range(7)]
+SELECTED_INDICES = [i for i in range(14)]
 class RM65_Dataset3D(BaseDataset):
     def __init__(self,
             zarr_path, 
@@ -24,7 +24,7 @@ class RM65_Dataset3D(BaseDataset):
             num_points=4096,
             ):
         super().__init__()
-        cprint(f'Loading GR1DexDataset from {zarr_path}', 'green')
+        cprint(f'Loading RM65_Dataset3D from {zarr_path}', 'green')
         self.task_name = task_name
         self.num_points = num_points
 
@@ -102,10 +102,10 @@ class RM65_Dataset3D(BaseDataset):
         return len(self.sampler)
 
     # =========================================================
-    # ✅ 修改点2: 返回数据时只保留前7维
+    # ✅ 修改点2: 返回数据时只保留前14维
     # =========================================================
     def _sample_to_data(self, sample):
-        # 截取前7维 agent_pos / action
+        # 截取前14维 agent_pos / action
         agent_pos = sample['state'][..., SELECTED_INDICES].astype(np.float32)
         action = sample['state'][..., SELECTED_INDICES].astype(np.float32)
 

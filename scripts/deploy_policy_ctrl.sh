@@ -5,7 +5,7 @@
 #   bash scripts/deploy_policy.sh idp3 rm_3d 20251108_put_cup_in_basket
 #   bash scripts/deploy_policy.sh idp3_6d rm_3d put_two_cup_into_bakset_20251109_19-21
 #   bash scripts/deploy_policy_ctrl.sh controlnet stage2_dualarm_put_coffee_1127-1558
-dataset_path=/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/put_cup_into_basket_dataset_1108.zarr
+dataset_path=/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_1130_original.zarr
 
 
 DEBUG=False

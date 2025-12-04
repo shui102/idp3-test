@@ -25,7 +25,7 @@ stage1:
       seed: 42
       val_ratio: 0.00
       max_train_episodes: 90
-      zarr_path: "/home/shui/DMP_gen/final_merged_dataset/merged_dataset_total.zarr"
+      zarr_path: "/media/shui/Lexar/dataset_12031652_processed/dataset_for_DMP.zarr"
 
   dataloader:
     # batch_size: 120

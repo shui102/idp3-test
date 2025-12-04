@@ -321,6 +321,8 @@ class ActionAgent:
             left_grip = action_np[6]
             right_rad = action_np[7:13]
             right_grip = action_np[13]
+        
+        left_rad[5] += np.radians(180)
         try:
             # 下发双臂关节角（弧度）
             if left_rad is not None:
@@ -435,6 +437,7 @@ class ActionAgent:
                     if left_arm_angles is not None:
                         # self.joint_qpos[:6] = np.radians(left_arm_angles).astype(np.float32)
                         self.joint_qpos[:6] = np.radians(left_arm_angles).astype(np.float32)
+                        # self.joint_qpos[5] -= np.radians(180)
                     right_arm_angles = joint_dict.get("right_arm")
                     if right_arm_angles is not None:
                         self.joint_qpos[7:13] = np.radians(right_arm_angles).astype(np.float32)
@@ -678,8 +681,8 @@ class MaskPointCloudExtractor:
                 control_pcd_list.append(resampled_obs.astype(np.float32))
 
             # visualize_single_frame(obs_pcd_list, control_pcd_list, frame_idx=0)
-            if str(input("input something:")) == "0":
-                IPython.embed()
+            # if str(input("input something:")) == "0":
+            #     IPython.embed()
             return obs_pcd_list, control_pcd_list
 
 class RM65Inference:
@@ -720,7 +723,7 @@ class RM65Inference:
         self.frame_lock = threading.Lock()
 
         self.extractor.init_tracker(
-            api_token="e40451af8ac84b890632aada4de5a4fd",
+            api_token="841bcd0d691170479c7f759523be12f2",
             prompt_text="white cup.yellow cup. blue box.",
             detection_interval=1000
         )
@@ -740,7 +743,7 @@ class RM65Inference:
             # --- 执行动作 ---
             # t_exec_0  = time.time()
             self.action_agent.execute(act, mode=self.mode)
-            self.fake_gripper_state = act[6]     
+            # self.fake_gripper_state = act[6]     
             # t_exec_1  = time.time()
             # cprint(f"delta_time:{t_exec_1-t_exec_0}","red")
             
@@ -759,7 +762,8 @@ class RM65Inference:
             
             # --- 从 ActionAgent 获取机械臂状态 ---
             env_qpos = np.copy(self.action_agent.joint_qpos)
-            env_qpos[6] = 0.0 if self.fake_gripper_state < 0.5 else 1.0
+            # env_qpos[6] = 0.0 if self.fake_gripper_state < 0.5 else 1.0
+            env_qpos[5] -= np.radians(180)
             env_pose = np.copy(self.action_agent.pose)
 
             self.pose_array.append(env_pose)
@@ -797,7 +801,7 @@ class RM65Inference:
             obs_dict = {
                 'agent_pos': torch.from_numpy(qpose_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(obs_cloud).unsqueeze(0).to(self.device),
-                'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
+                # 'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
             }
         if self.mode == 'pose10d':
             obs_dict = {
@@ -828,7 +832,8 @@ class RM65Inference:
 
         # --- 状态来自 ActionAgent ---
         env_qpos = np.copy(self.action_agent.joint_qpos)
-        env_qpos[6] = self.fake_gripper_state
+        # env_qpos[6] = self.fake_gripper_state
+        env_qpos[5] -= np.radians(180)
         env_pose = np.copy(self.action_agent.pose)
 
         self.env_qpos_array.append(env_qpos)
@@ -851,7 +856,7 @@ class RM65Inference:
             obs_dict = {
                 'agent_pos': torch.from_numpy(qpos_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(np.array(obs_clouds)).unsqueeze(0).to(self.device),
-                'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
+                # 'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
             }
         if self.mode == 'pose10d':
             obs_dict = {
@@ -903,6 +908,7 @@ def main(cfg: OmegaConf):
         while step_count < roll_out_length:
             time0 = time.time()
             with torch.no_grad():
+                # IPython.embed()
                 action = policy(obs_dict)[0]
                 action_list = [act.numpy() for act in action[3:]]
             time1 = time.time()
