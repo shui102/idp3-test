@@ -429,7 +429,7 @@ class BalancerWorkspace(BaseWorkspace):
 
         # 5. 聚类
         X = torch.cat(embeddings_list, dim=0)
-        K = 10 
+        K = 70
         
         centers, labels, density = kmeans_pytorch(X, k=K, n_iter=100)
                 
@@ -461,7 +461,7 @@ class BalancerWorkspace(BaseWorkspace):
         self.encoder_map = centers.detach()       # (K, D)
         self.weights_map = normalized_weights.detach() # (K,)
         
-        cprint(f"Updated weights map. Top density: {torch.topk(density, 5).values}", "green")
+        cprint(f"Updated weights map. Top density: {torch.topk(density, K).values}", "green")
         
         # 恢复训练模式
         self.model.train()

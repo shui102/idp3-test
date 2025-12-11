@@ -3,7 +3,7 @@
 #   bash scripts/train_policy.sh idp3 gr1_dex-3d 0913_example
 #   bash scripts/train_policy.sh dp_224x224_r3m gr1_dex-image 0913_example
 #   bash scripts/train_policy.sh idp3_6d rm_3d put_two_cup_into_basket_20251109_19-21
-dataset_path=/media/shui/Lexar/new_generated_dataset/new_generated_dataset.zarr
+dataset_path=/home/shui/idp3_test/Improved-3D-Diffusion-Policy/data/dataset_12101530_longepi_processed.zarr
 
 DEBUG=False
 wandb_mode=online

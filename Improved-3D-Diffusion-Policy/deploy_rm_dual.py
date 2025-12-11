@@ -135,10 +135,12 @@ class RealSenseCamera:
             self.align = rs.align(align_to)
 
             # 外参设置 (保持你原有的逻辑)
-            R_world_cam = np.array([[-0.04975599, -0.86800262,  0.49406051],
-                                    [-0.99875799,  0.0445353,  -0.02234025],
-                                    [-0.00261174, -0.49455845, -0.86914045]])
-            t_world_cam = np.array([-0.79518668,0.2869315,0.7312764])
+            R_world_cam = np.array([[-0.01108151, -0.87621233,  0.48179783],
+                                    [-0.99720264,  0.04530241,  0.05945237],
+                                    [-0.0739195,  -0.47979124, -0.87426327]])
+
+            # 这是平移向量 t (相机在世界中的 [x, y, z] 位置)
+            t_world_cam = np.array([-0.76848453,0.26575023,0.6748011])
             T_world_cam = np.eye(4)
             T_world_cam[:3, :3] = R_world_cam
             T_world_cam[:3, 3] = t_world_cam
@@ -252,7 +254,7 @@ class RealSenseCamera:
         self.stop()
 
 class ActionAgent:
-    def __init__(self, gripper_threshold=0.5):
+    def __init__(self, gripper_threshold=0.1):
         self.rm_interface = Realman65Interface(auto_setup=False)
 
         try:
@@ -322,7 +324,7 @@ class ActionAgent:
             right_rad = action_np[7:13]
             right_grip = action_np[13]
         
-        left_rad[5] += np.radians(180)
+        # left_rad[5] += np.radians(180)
         try:
             # 下发双臂关节角（弧度）
             if left_rad is not None:
@@ -435,9 +437,9 @@ class ActionAgent:
                 if joint_dict:
                     left_arm_angles = joint_dict.get("left_arm")
                     if left_arm_angles is not None:
-                        # self.joint_qpos[:6] = np.radians(left_arm_angles).astype(np.float32)
+                        
                         self.joint_qpos[:6] = np.radians(left_arm_angles).astype(np.float32)
-                        # self.joint_qpos[5] -= np.radians(180)
+                        
                     right_arm_angles = joint_dict.get("right_arm")
                     if right_arm_angles is not None:
                         self.joint_qpos[7:13] = np.radians(right_arm_angles).astype(np.float32)
@@ -535,7 +537,7 @@ class MaskPointCloudExtractor:
         self.camera = camera
         self.kin_helper = kin_helper
         self.tracker = None
-        self.CONTROL_OBJECT_NAMES = ["blue box"]
+        self.CONTROL_OBJECT_NAMES = ["cubic box"]
         self.TARGET_OBJECT_NAMES = ["white cup", "yellow cup"]
 
     def init_tracker(self, api_token, prompt_text, detection_interval=1000):
@@ -724,7 +726,7 @@ class RM65Inference:
 
         self.extractor.init_tracker(
             api_token="841bcd0d691170479c7f759523be12f2",
-            prompt_text="white cup.yellow cup. blue box.",
+            prompt_text="white cup.yellow cup. cubic box.",
             detection_interval=1000
         )
         self.fake_gripper_state = 0.0
@@ -763,7 +765,7 @@ class RM65Inference:
             # --- 从 ActionAgent 获取机械臂状态 ---
             env_qpos = np.copy(self.action_agent.joint_qpos)
             # env_qpos[6] = 0.0 if self.fake_gripper_state < 0.5 else 1.0
-            env_qpos[5] -= np.radians(180)
+            # env_qpos[5] -= np.radians(180)
             env_pose = np.copy(self.action_agent.pose)
 
             self.pose_array.append(env_pose)
@@ -833,7 +835,7 @@ class RM65Inference:
         # --- 状态来自 ActionAgent ---
         env_qpos = np.copy(self.action_agent.joint_qpos)
         # env_qpos[6] = self.fake_gripper_state
-        env_qpos[5] -= np.radians(180)
+        # env_qpos[5] -= np.radians(180)
         env_pose = np.copy(self.action_agent.pose)
 
         self.env_qpos_array.append(env_qpos)

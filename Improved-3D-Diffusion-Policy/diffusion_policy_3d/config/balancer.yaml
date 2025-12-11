@@ -120,7 +120,7 @@ training:
   resume: True
   lr_scheduler: cosine
   lr_warmup_steps: 1000
-  num_epochs: 301
+  num_epochs: 501
   gradient_accumulate_every: 1
   use_ema: True
   rollout_every: 400
@@ -137,7 +137,7 @@ logging:
   id: null
   mode: online
   name: ${training.seed}
-  project: balancer_12032218
+  project: balancer_12101747_longepi_clusterK70
   resume: true
   tags:
   - train_diffusion_unet_hybrid
