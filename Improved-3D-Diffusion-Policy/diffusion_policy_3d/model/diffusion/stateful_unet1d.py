@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 from einops.layers.torch import Rearrange
+import IPython
 
 # 若你的工程路径不同，请按需修改导入
 from diffusion_policy_3d.model.diffusion.conv1d_components import (
@@ -468,8 +469,9 @@ class ConditionalControlUnet1D(nn.Module):
         # --- Step 5. ControlNet 编码器 ---
         ctrl = self.control_proj(control_input)           # [B, C_in]
         ctrl = ctrl.unsqueeze(-1).expand(-1, -1, T)       # [B, C_in, T]
-        # x_ctrl = sample + ctrl
-        x_ctrl = ctrl
+        x_ctrl = sample + ctrl
+        # IPython.embed()
+        # x_ctrl = ctrl
         h_ctrl = []
         for res1, res2, down in self.ctrl_downs:
             x_ctrl = res1(x_ctrl, global_feature)
@@ -486,9 +488,11 @@ class ConditionalControlUnet1D(nn.Module):
 
         # --- Step 8. 解码阶段（decoder） ---
         for i, (res1, res2, up) in enumerate(self.unet.up_modules):
-            x = x + h_ctrl.pop()                        # control skip
-            x = torch.cat((x, h.pop()), dim=1)          # 主干 skip
-            x_hat = self.ctrl_zero_blocks[i](x)         # 控制残差
+            x_ = x + h_ctrl.pop()                        # control skip
+            h_curr = h.pop()
+            x_ = torch.cat((x_, h_curr), dim=1)         # 主干 skip
+            x = torch.cat((x, h_curr), dim=1)
+            x_hat = self.ctrl_zero_blocks[i](x_)         # 控制残差
             x = res1(x, global_feature)
             # 在最后一层融合 local_cond
             # if i == len(self.unet.up_modules)-1 and len(h_local) > 1:
@@ -497,6 +501,7 @@ class ConditionalControlUnet1D(nn.Module):
             x = x + x_hat
             # cprint(f"x_hat:{x_hat}", 'red')
             x = up(x)
+            # IPython.embed()
 
         # --- Step 9. 输出 ---
         out = self.unet.final_conv(x)      # [B, C, T]
@@ -532,7 +537,7 @@ def test_control_unet_forward():
     model.eval()
 
     # 构造假输入
-    sample = torch.randn(batch_size, input_dim, horizon, device=device)  # (B, C, T)
+    sample = torch.randn(batch_size, horizon,input_dim, device=device)  # (B, C, T)
     timestep = torch.randint(0, 1000, (batch_size,), device=device)      # (B,)
     control_input = torch.randn(batch_size, control_dim, device=device)  # (B, 1024)
     global_cond = torch.randn(batch_size, global_cond_dim, device=device)# (B, 64)

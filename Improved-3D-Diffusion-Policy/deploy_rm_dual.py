@@ -537,7 +537,7 @@ class MaskPointCloudExtractor:
         self.camera = camera
         self.kin_helper = kin_helper
         self.tracker = None
-        self.CONTROL_OBJECT_NAMES = ["cubic box"]
+        self.CONTROL_OBJECT_NAMES = ["white kettle"]
         self.TARGET_OBJECT_NAMES = ["white cup", "yellow cup"]
 
     def init_tracker(self, api_token, prompt_text, detection_interval=1000):
@@ -725,8 +725,8 @@ class RM65Inference:
         self.frame_lock = threading.Lock()
 
         self.extractor.init_tracker(
-            api_token="841bcd0d691170479c7f759523be12f2",
-            prompt_text="white cup.yellow cup. cubic box.",
+            api_token="bb0bc715d7f4d9b3ce8ea1eb7659f470",
+            prompt_text="white cup.yellow cup. white kettle.",
             detection_interval=1000
         )
         self.fake_gripper_state = 0.0
@@ -803,13 +803,13 @@ class RM65Inference:
             obs_dict = {
                 'agent_pos': torch.from_numpy(qpose_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(obs_cloud).unsqueeze(0).to(self.device),
-                # 'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
+                'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
             }
         if self.mode == 'pose10d':
             obs_dict = {
                 'agent_pos': torch.from_numpy(pose_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(obs_cloud).unsqueeze(0).to(self.device),
-                'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
+                # 'control_point_cloud': torch.from_numpy(control_obs_cloud).unsqueeze(0).to(self.device),
             }
 
         cprint(f"[STEP] agent_pos shape: {obs_dict['agent_pos']}", "red")
@@ -858,13 +858,13 @@ class RM65Inference:
             obs_dict = {
                 'agent_pos': torch.from_numpy(qpos_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(np.array(obs_clouds)).unsqueeze(0).to(self.device),
-                # 'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
+                'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
             }
         if self.mode == 'pose10d':
             obs_dict = {
                 'agent_pos': torch.from_numpy(pose_stack).unsqueeze(0).to(self.device),
                 'point_cloud': torch.from_numpy(np.array(obs_clouds)).unsqueeze(0).to(self.device),
-                'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
+                # 'control_point_cloud': torch.from_numpy(np.array(control_obs_clouds)).unsqueeze(0).to(self.device),
             }
 
         cprint(f"[RESET] agent_pos: {obs_dict['agent_pos']}", "red")

@@ -430,6 +430,12 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
                               control_input=control_feat,
                               local_cond=None,
                               global_cond=global_cond)
+            out2 = self.model(sample=noisy_trajectory,
+                    timestep=timesteps,
+                    control_input= None,
+                    local_cond=None,
+                    global_cond=global_cond)
+            print("pred - out2", (pred - out2).abs().max().item())
         else:
             pred = self.model(sample=noisy_trajectory,
                               timestep=timesteps,
@@ -503,144 +509,131 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
 
 
 
-import torch
-import torch.nn as nn
-from termcolor import cprint
-
-def test_stage1_vs_stage2_consistency():
-    cprint("\n====== 开始一致性测试 (Stage 1 vs Stage 2) ======", "cyan")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # 1. 准备配置
+def main():
     shape_meta = {
-        "action": {"shape": (30,)},
+        "action": {"shape": (1+0,)},
         "obs": {
-            "agent_pos": {"shape": (10, )},
+            "agent_pos": {"shape": (10, )},         # 举例用的低维
             "agent_rot": {"shape": (6, )},
-            "point_cloud": {"shape": (4096, 6)},
+            "point_cloud": {"shape": (4096, 6)},  # Stage1: 4096×6
         },
         "control": {
-            "control_point_cloud": {"shape": (1024, 3)},
+            "point_cloud": {"shape": (1024, 3)},  # Stage2: 1024×3
         }
     }
-    SimpleCfg = lambda c, o, n: type("cfg", (), {
-        "in_channels": c, "out_channels": 128, "use_layernorm": True, 
-        "final_norm": "layernorm", "normal_channel": False, 
-        "num_points": n, "use_bn": True
-    })()
-    
-    stage1_cfg = SimpleCfg(6, 4096, 4096)
-    stage2_cfg = SimpleCfg(3, 1024, 1024)
-    noise_scheduler = DDPMScheduler(num_train_timesteps=50)
 
-    # 2. 初始化 Stage 1
-    cprint(">> 初始化 Stage 1 Policy...", "yellow")
-    policy1 = DiffusionPointcloudControlPolicy(
+    noise_scheduler = DDPMScheduler(num_train_timesteps=50)
+    stage1_cfg = type("cfg", (), {
+        "in_channels": 6,
+        "out_channels": 128,
+        "use_layernorm": True,
+        "final_norm": "layernorm",
+        "normal_channel": False,
+        "num_points": 4096,
+        "use_bn": True,
+    })()
+
+    stage2_cfg = type("cfg", (), {
+        "in_channels": 3,
+        "out_channels": 128,
+        "use_layernorm": True,
+        "final_norm": "layernorm",
+        "normal_channel": False,
+        "num_points": 1024,
+        "use_bn": True,
+    })()
+
+    policy_unet = DiffusionPointcloudControlPolicy(
         shape_meta=shape_meta,
         noise_scheduler=noise_scheduler,
-        horizon=16, n_action_steps=15, n_obs_steps=2,
+        horizon=16,
+        n_action_steps=15,
+        n_obs_steps=2,
         obs_as_global_cond=True,
+        diffusion_step_embed_dim=128,
+        down_dims=(256, 512, 1024),
+        kernel_size=5,
+        n_groups=8,
         train_stage="unet",
         stage1_pointcloud_encoder_cfg=stage1_cfg,
         stage2_control_encoder_cfg=stage2_cfg
-    ).to(device)
+    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    policy_unet.to(device)
 
-    for p in policy1.parameters():
-        if p.requires_grad:
-            nn.init.normal_(p, mean=0.0, std=0.02)
-    
+    B = 2
+    obs_batch = {
+        "agent_pos": torch.randn(B,2, 10, device=device),
+        "agent_rot": torch.randn(B,2, 6, device=device),
+        "point_cloud": torch.randn(B, 2, 4096, 6, device=device),
+    }
+    act_batch = torch.randn(B, 16, 30, device=device)
+    batch_unet = {"obs": obs_batch, "action": act_batch}
+
     for key in ["agent_pos", "agent_rot", "point_cloud", "action"]:
-        policy1.normalizer.params_dict[key] = nn.ParameterDict({
-            "mean": nn.Parameter(torch.randn(1, device=device)),
-            "scale": nn.Parameter(torch.rand(1, device=device) + 0.1),
-            "offset": nn.Parameter(torch.randn(1, device=device))
+        policy_unet.normalizer.params_dict[key] = nn.ParameterDict({
+            "mean": nn.Parameter(torch.zeros(1, device=device)),
+            "scale": nn.Parameter(torch.ones(1, device=device)),
+            "offset": nn.Parameter(torch.zeros(1, device=device))
         })
+    
+    with torch.no_grad():
+        _ = policy_unet.forward(obs_batch)
+    loss1, _ = policy_unet.compute_loss(batch_unet)
+    print("[Stage1] loss:", float(loss1.item()))
 
-    # ================= 关键修改位置 =================
-    # 3. 保存 (适配你的特定读取逻辑)
-    # ===============================================
-    ckpt_path = "temp_stage1_test.ckpt" # 必须是 .ckpt
-    payload = {
-        "state_dicts": {
-            "model": policy1.state_dict() # 包装在 state_dicts['model'] 下
+    pretrained_unet_state = policy_unet.model.state_dict()
+    torch.save(pretrained_unet_state, "/extra/waylen/diffusion_policy/tmp/pretrained_unet_stage1.pth")
+
+    cprint("\n=== Stage2: ControlNet Training ===", "green")
+    shape_meta = {
+        "action": {"shape": (30,)},
+        "obs": {
+            "agent_pos": {"shape": (10, )},         # 举例用的低维
+            "agent_rot": {"shape": (6, )},
+            "point_cloud": {"shape": (4096, 6)},  # Stage1: 4096×6
+        },
+        "control": {
+            "control_point_cloud": {"shape": (1024, 3)},  # Stage2: 1024×3
         }
     }
-    torch.save(payload, ckpt_path)
-    cprint(f">> Stage 1 权重已保存至 {ckpt_path} (Nested Dict)", "green")
-
-    # 4. 初始化 Stage 2
-    cprint(">> 初始化 Stage 2 Policy (ControlNet)...", "yellow")
-    policy2 = DiffusionPointcloudControlPolicy(
+    policy_ctrl = DiffusionPointcloudControlPolicy(
         shape_meta=shape_meta,
-        noise_scheduler=noise_scheduler,
-        horizon=16, n_action_steps=15, n_obs_steps=2,
+        noise_scheduler=copy.deepcopy(noise_scheduler),
+        horizon=16,
+        n_action_steps=15,
+        n_obs_steps=2,
         obs_as_global_cond=True,
+        diffusion_step_embed_dim=128,
+        down_dims=(256, 512, 1024),
+        kernel_size=5,
+        n_groups=8,
         train_stage="controlnet",
-        pretrained_unet_path=ckpt_path,
+        pretrained_unet_path="/extra/waylen/diffusion_policy/tmp/pretrained_unet_stage1.pth",   # 下面手动 load_state_dict
         stage1_pointcloud_encoder_cfg=stage1_cfg,
         stage2_control_encoder_cfg=stage2_cfg
     ).to(device)
-    
-    # 同步 Normalizer
-    policy2.load_state_dict(policy1.state_dict(), strict=False) 
 
-    # 5. 验证权重
-    p1_enc = list(policy1.obs_encoder_stage1.parameters())[0]
-    p2_enc = list(policy2.obs_encoder_stage1.parameters())[0]
-    if torch.equal(p1_enc, p2_enc):
-        cprint("✅ 检测通过: Obs Encoder 权重一致", "green")
-    else:
-        cprint("❌ 检测失败: Obs Encoder 权重不一致！", "red")
-        return
-
-    # 6. 推理对比
-    cprint(">> 执行前向推理对比...", "yellow")
-    B = 2
-    batch_obs = {
-        "agent_pos": torch.randn(B, 2, 10, device=device),
-        "agent_rot": torch.randn(B, 2, 6, device=device),
-        "point_cloud": torch.randn(B, 2, 4096, 6, device=device),
-        "control_point_cloud": torch.randn(B, 2, 1024, 3, device=device)
+    batch_ctrl = {
+        "obs": obs_batch,                 # 仍然需要 4096×6，用于 global_cond
+        "action": act_batch,
+        "control": {
+            "control_point_cloud": torch.randn(B, 2, 1024, 3, device=device)  # ControlNet 输入
+        }
     }
-    
-    noisy_action = torch.randn(B, 16, 30, device=device)
-    timesteps = torch.randint(0, 50, (B,), device=device).long()
-    
+
+    for key in ["agent_pos", "agent_rot", "point_cloud", "action", "control_point_cloud"]:
+        policy_ctrl.normalizer.params_dict[key] = nn.ParameterDict({
+            "mean": nn.Parameter(torch.zeros(1, device=device)),
+            "scale": nn.Parameter(torch.ones(1, device=device)),
+            "offset": nn.Parameter(torch.zeros(1, device=device))
+        })
+
     with torch.no_grad():
-        # === Stage 1 ===
-        batch_obs_stage1 = {k: v for k, v in batch_obs.items() if k != "control_point_cloud"}
-        nobs1 = policy1.normalizer.normalize(batch_obs_stage1)
-        
-        this_nobs1 = dict_apply(nobs1, lambda x: x[:, :2, ...].reshape(-1, *x.shape[2:]))
-        # ⚠️ 修改点 1：reshape(B, -1) 而不是 reshape(B, 2, -1)
-        # 将 (Batch, Time, Dim) 展平为 (Batch, Time*Dim) 以匹配 Unet 的输入要求
-        global_cond1 = policy1.obs_encoder_stage1(this_nobs1).reshape(B, -1)
-        
-        out1 = policy1.model(sample=noisy_action, timestep=timesteps, global_cond=global_cond1)
+        out = policy_ctrl.forward({**obs_batch, "control_point_cloud": batch_ctrl["control"]["control_point_cloud"]})
+        print("forward(action) shape:", out.shape)
+    loss2, _ = policy_ctrl.compute_loss(batch_ctrl)
+    print("[Stage2] loss:", float(loss2.item()))
 
-        # === Stage 2 ===
-        batch_obs_stage2 = {k: v for k, v in batch_obs.items() if k != "control_point_cloud"}
-        nobs2 = policy2.normalizer.normalize(batch_obs_stage2)
-        
-        this_nobs2 = dict_apply(nobs2, lambda x: x[:, :2, ...].reshape(-1, *x.shape[2:]))
-        # ⚠️ 修改点 2：同样展平
-        global_cond2 = policy2.obs_encoder_stage1(this_nobs2).reshape(B, -1)
-        
-        # 处理 Control Input
-        ctrl_pc = batch_obs["control_point_cloud"]
-        ctrl_feat = policy2.control_encoder2({"control_point_cloud": ctrl_pc.reshape(-1, 1024, 3)})
-        
-        # Control Feature 处理 (Batch, Time, Dim) -> Mean -> (Batch, Dim)
-        # 这里你的 forward 逻辑里是取 mean，所以维度已经是 2D 的了，没问题
-        ctrl_feat = ctrl_feat.reshape(B, 2, -1).mean(dim=1)
-
-        out2 = policy2.model(sample=noisy_action, timestep=timesteps, 
-                             global_cond=global_cond2, control_input=ctrl_feat)
-
-    diff = (out1 - out2).abs().max().item()
-    print(f"\nStage 1 Output Mean: {out1.mean().item():.5f}")
-    print(f"Stage 2 Output Mean: {out2.mean().item():.5f}")
-    print(f"Max Difference: {diff:.8f}")
-
-if __name__ == "__main__":
-    test_stage1_vs_stage2_consistency()
+# if __name__ == "__main__":
+#     main()
