@@ -177,7 +177,7 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
             cprint(f"[ControlNet] loaded pretrained UNet with {len(missing)} missing and {len(unexpected)} unexpected keys","red")
 
             for p in self.model.unet.parameters():
-                p.requires_grad = False
+                p.requires_grad = True
             cprint("[ControlNet] UNet is frozen. Only training ControlNet branch.", "yellow")
             if len(encoder_dict) > 0:
             # 注意：这里要加 strict=False，因为 obs_encoder 可能包含一些不需要的 buffer
@@ -188,7 +188,7 @@ class DiffusionPointcloudControlPolicy(BasePolicy):
                 cprint("[ControlNet] 如果继续，Encoder 将是随机初始化的，训练将失败。", "red")
 
             for param in self.obs_encoder_stage1.parameters():
-                param.requires_grad = False
+                param.requires_grad = True
 
         self.noise_scheduler = noise_scheduler
         self.mask_generator = LowdimMaskGenerator(

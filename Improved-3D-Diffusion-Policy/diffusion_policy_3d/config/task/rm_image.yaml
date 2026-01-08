@@ -1,27 +1,33 @@
-name: rm65_task
+name: basket
 
 shape_meta: &shape_meta
+  # acceptable types: rgb, low_dim
   obs:
+    # 替换点云为 RGB 图片（适配 2D Diffusion Policy）
     image:
-      shape: [3, 224, 224]
-      type: rgb
-      horizon: 2
+      shape: [3, 224, 224]  # 2D 图片维度（RGB 3通道，224x224分辨率，与dp_224x224_r3m.yaml一致）
+      type: rgb              # 类型为rgb（替代3D的point_cloud）
+      horizon: 2             # 观测步数，与dp_224x224_r3m.yaml中n_obs_steps=2对齐
     agent_pos:
-      shape: [7]
+      shape: [14]            # 保持rm_3d.yaml中低维状态维度
       type: low_dim
-      horizon: 2
+      horizon: 2             # 低维状态的观测步数，与image的horizon一致
   action:
-    shape: [7]
-    horizon: 16
+    shape: [14]              # 保持rm_3d.yaml中动作维度
+    horizon: 16              # 动作预测步数，与dp_224x224_r3m.yaml中n_action_steps=16对齐
 
 dataset:
-  _target_: diffusion_policy_3d.dataset.rm65_image_dataset.RM65DatasetImage
-  zarr_path: /home/shui/your_rm65_image_dataset.zarr
+  # 替换为2D图片数据集类（参考rm_image.yaml的_target_）
+  _target_: diffusion_policy_3d.dataset.rm65_dataset_image.RM65DatasetImage
+  # 数据集路径（可通过命令行覆盖，或固定为实际路径）
+  zarr_path: ${task.dataset.zarr_path}
+  # 以下参数与rm_3d.yaml对齐，适配2D任务
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
   seed: 42
-  val_ratio: 0.05
+  val_ratio: 0.00
   max_train_episodes: 90
-  use_img: true
-  use_depth: false
+  # 2D图片任务特有参数（参考rm_image.yaml）
+  use_img: true   # 启用图片观测
+  use_depth: false# 不使用深度图（若需深度可改为true，需同步修改dp_224x224_r3m.yaml的depth配置）

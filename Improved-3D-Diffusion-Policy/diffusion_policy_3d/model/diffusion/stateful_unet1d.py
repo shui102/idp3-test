@@ -365,7 +365,7 @@ class ConditionalControlUnet1D(nn.Module):
         )
 
         for param in self.unet.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
 
         # --------- ControlNet 结构 ---------
         all_dims = [input_dim] + list(down_dims)

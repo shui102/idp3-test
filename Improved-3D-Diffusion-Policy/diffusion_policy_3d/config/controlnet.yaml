@@ -241,6 +241,6 @@ stage2:
     save_last_ckpt: True # this only saves when save_ckpt is True
     save_last_snapshot: False
   logging:
-    project: "12301717-filtered-stage2-3modality"
+    project: "01072000-allgrad-stage2-3modality"
     group: "run"
     name: "stage2-exp"
